@@ -1,13 +1,13 @@
+#pragma once
 #include <iostream>
 #include <string>
 #include "character.h"
 using namespace std;
 
 class Card {
-    private:
-        string key;
-
     public:
+        string key;
+        
         Character obj_character;
         string characterName;
         string image_path;
