@@ -2,12 +2,14 @@
 #include <iostream>
 #include <string>
 #include "character.h"
+#include "enums.h"
 using namespace std;
 
 class Card {
     public:
         string key;
-        
+        CardState state;
+
         Character obj_character;
         string characterName;
         string image_path;
@@ -17,6 +19,7 @@ class Card {
             characterName = "";
             image_path = "";
             key = "";
+            state = CardState::SECRET;
         }
 
         void init(Character character) {
@@ -24,6 +27,7 @@ class Card {
             characterName = character.name;
             image_path = character.image_path;
             key = "";
+            state = CardState::SECRET;
         }
 
         string turnCard() {
