@@ -1,3 +1,5 @@
+//Sets up the board and teams.
+
 #pragma once
 #include <string>
 #include <vector>
