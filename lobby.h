@@ -36,6 +36,8 @@ class Lobby {
         }
 
     public:
+        static constexpr size_t maxNameLength = 30;
+
         Lobby(int spiesPerTeam = 1, int guessersPerTeam = 1) {
             this->spiesPerTeam = spiesPerTeam;
             this->guessersPerTeam = guessersPerTeam;
@@ -61,9 +63,15 @@ class Lobby {
             return slots;
         }
 
+        // The name is stored without the spaces around it.
         void addPlayer(string name, Team team, Role role) {
-            if (name.empty()) {
+            size_t first = name.find_first_not_of(" \t\r\n");
+            if (first == string::npos) {
                 throw invalid_argument("Player name cannot be empty");
+            }
+            name = name.substr(first, name.find_last_not_of(" \t\r\n") - first + 1);
+            if (name.size() > maxNameLength) {
+                throw invalid_argument("Player name cannot have more than " + to_string(maxNameLength) + " characters");
             }
             for (const Player& player : joined) {
                 if (player.name == name) {

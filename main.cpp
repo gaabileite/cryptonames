@@ -110,10 +110,15 @@ void playFromConsole(Match& match) {
 
 int main() {
     try {
+        vector<Character> characters = loadCharacters("characters.db");
+        if (characters.size() < 25) {
+            throw runtime_error("The database needs at least 25 characters, found " + to_string(characters.size()));
+        }
+
         Lobby lobby;
         assignPlayersFromConsole(lobby);
 
-        Match match(lobby, loadCharacters("characters.db"));
+        Match match(lobby, characters);
         playFromConsole(match);
     } catch (const exception& e) {
         cerr << "Error: " << e.what() << endl;

@@ -14,7 +14,7 @@ inline mt19937& rng() {
     return gen;
 }
 
-CardKey KPossibilities[25] = {
+inline const CardKey KPossibilities[25] = {
     CardKey::BLUE, CardKey::BLUE, CardKey::BLUE, CardKey::BLUE, CardKey::BLUE, CardKey::BLUE, CardKey::BLUE, CardKey::BLUE,
     CardKey::RED, CardKey::RED, CardKey::RED, CardKey::RED, CardKey::RED, CardKey::RED, CardKey::RED, CardKey::RED,
     CardKey::BLACK,
