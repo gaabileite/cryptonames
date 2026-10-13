@@ -1,9 +1,9 @@
 // Tests for the game rules (Lobby, Match, Grid, enums), no database or network needed.
-// Build and run: g++ -std=c++17 tests.cpp -o tests && ./tests
+// Build and run: make test
 #include <map>
 #include <set>
-#include "lobby.h"
-#include "match.h"
+#include "game/lobby.h"
+#include "game/match.h"
 
 int failures = 0;
 

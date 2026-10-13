@@ -3,8 +3,11 @@
 #include <vector>
 #include <stdexcept>
 #include <sqlite3.h>
-#include "character.h"
+#include "game/character.h"
 using namespace std;
+
+// Where the characters live, relative to the project folder (programs are run from there).
+inline const string defaultDatabasePath = "data/characters.db";
 
 // Reads a TEXT column as a string, treating NULL as "".
 inline string columnText(sqlite3_stmt* stmt, int column) {
@@ -12,7 +15,8 @@ inline string columnText(sqlite3_stmt* stmt, int column) {
     return text ? string(reinterpret_cast<const char*>(text)) : "";
 }
 
-// Loads every row of the "marvel" table in characters.db as a Character.
+// Loads every row of the "marvel" table as a Character.
+// image_path is the picture folder as the front-end asks for it (images/...), served from assets/images/.
 inline vector<Character> loadCharacters(const string& dbPath) {
     sqlite3* db = nullptr;
     if (sqlite3_open_v2(dbPath.c_str(), &db, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) {

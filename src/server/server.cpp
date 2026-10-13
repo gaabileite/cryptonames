@@ -1,7 +1,7 @@
 // HTTP server for the board game: one Lobby, then one Match, shared by every browser that connects.
 //
-// Build: g++ -std=c++17 server.cpp -lsqlite3 -pthread -o server
-// Run:   ./server [port] [host]      (defaults: 8080 127.0.0.1) - run it from the project folder.
+// Build: make server
+// Run:   build/server [port] [host]      (defaults: 8080 127.0.0.1) - run it from the project folder.
 //
 // Every endpoint answers JSON. A rejected action answers {"error": "..."} with a 4xx status.
 // Players identify themselves with the token they get from /api/join, sent in the X-Token header.
@@ -11,7 +11,7 @@
 //   GET  /api/board      the 25 cards as YOU may see them                               (X-Token)
 //   POST /api/guess      {"index": 0-24} -> {"key"}                                     (X-Token)
 //   POST /api/end-turn                                                                  (X-Token)
-// /images/... serves the card pictures and, if a web/ folder exists, / serves the front-end.
+// /images/... serves assets/images/ (the card pictures) and, if a web/ folder exists, / serves the front-end.
 #include <iostream>
 #include <map>
 #include <memory>
@@ -19,11 +19,11 @@
 #include <random>
 #include <functional>
 #include <filesystem>
-#include "third_party/httplib.h"
-#include "third_party/json.hpp"
-#include "database.h"
-#include "lobby.h"
-#include "match.h"
+#include "httplib.h"
+#include "json.hpp"
+#include "db/database.h"
+#include "game/lobby.h"
+#include "game/match.h"
 
 using namespace std;
 using json = nlohmann::json;
@@ -129,7 +129,7 @@ int main(int argc, char* argv[]) {
     string host = argc > 2 ? argv[2] : "127.0.0.1";
 
     try {
-        game.characters = loadCharacters("characters.db");
+        game.characters = loadCharacters(defaultDatabasePath);
     } catch (const exception& e) {
         cerr << "Error: " << e.what() << endl;
         return 1;
@@ -217,7 +217,7 @@ int main(int argc, char* argv[]) {
         return json{{"ok", true}};
     }));
 
-    server.set_mount_point("/images", "images");
+    server.set_mount_point("/images", "assets/images");
     if (filesystem::is_directory("web")) {
         server.set_mount_point("/", "web");
     }

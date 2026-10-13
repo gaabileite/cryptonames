@@ -1,11 +1,11 @@
 #include <iostream>
 #include <string>
-#include "character.h"
-#include "card.h"
-#include "grid.h"
-#include "database.h"
-#include "lobby.h"
-#include "match.h"
+#include "game/character.h"
+#include "game/card.h"
+#include "game/grid.h"
+#include "game/lobby.h"
+#include "game/match.h"
+#include "db/database.h"
 
 using namespace std;
 
@@ -110,7 +110,7 @@ void playFromConsole(Match& match) {
 
 int main() {
     try {
-        vector<Character> characters = loadCharacters("characters.db");
+        vector<Character> characters = loadCharacters(defaultDatabasePath);
         if (characters.size() < 25) {
             throw runtime_error("The database needs at least 25 characters, found " + to_string(characters.size()));
         }
