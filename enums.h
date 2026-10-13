@@ -99,3 +99,40 @@ inline string toString(CardState state) {
     }
     throw invalid_argument("Unknown CardState");
 }
+
+// The colour a card has for the spies
+enum class CardKey { BLUE, RED, BEIGE, BLACK };
+
+inline string toString(CardKey key) {
+    switch (key) {
+        case CardKey::BLUE: return "BLUE";
+        case CardKey::RED: return "RED";
+        case CardKey::BEIGE: return "BEIGE";
+        case CardKey::BLACK: return "BLACK";
+    }
+    throw invalid_argument("Unknown CardKey");
+}
+
+inline CardKey cardKeyFromString(const string& s) {
+    if (s == "BLUE") return CardKey::BLUE;
+    if (s == "RED") return CardKey::RED;
+    if (s == "BEIGE") return CardKey::BEIGE;
+    if (s == "BLACK") return CardKey::BLACK;
+    throw invalid_argument("Unknown card key: " + s);
+}
+
+// The key of the cards that belong to a team
+inline CardKey keyOf(Team team) {
+    return team == Team::BLUE ? CardKey::BLUE : CardKey::RED;
+}
+
+// Match
+enum class MatchState { IN_PROGRESS, FINISHED };
+
+inline string toString(MatchState state) {
+    switch (state) {
+        case MatchState::IN_PROGRESS: return "IN_PROGRESS";
+        case MatchState::FINISHED: return "FINISHED";
+    }
+    throw invalid_argument("Unknown MatchState");
+}

@@ -14,11 +14,11 @@ inline mt19937& rng() {
     return gen;
 }
 
-string KPossibilities[25] = {
-    "BLUE", "BLUE", "BLUE", "BLUE", "BLUE", "BLUE", "BLUE", "BLUE", 
-    "RED", "RED", "RED", "RED", "RED", "RED", "RED", "RED", 
-    "BLACK", 
-    "BEIGE", "BEIGE", "BEIGE", "BEIGE", "BEIGE", "BEIGE", "BEIGE", "BEIGE"
+CardKey KPossibilities[25] = {
+    CardKey::BLUE, CardKey::BLUE, CardKey::BLUE, CardKey::BLUE, CardKey::BLUE, CardKey::BLUE, CardKey::BLUE, CardKey::BLUE,
+    CardKey::RED, CardKey::RED, CardKey::RED, CardKey::RED, CardKey::RED, CardKey::RED, CardKey::RED, CardKey::RED,
+    CardKey::BLACK,
+    CardKey::BEIGE, CardKey::BEIGE, CardKey::BEIGE, CardKey::BEIGE, CardKey::BEIGE, CardKey::BEIGE, CardKey::BEIGE, CardKey::BEIGE
 };
 
 class Grid {
@@ -49,7 +49,7 @@ class Grid {
         // Sets the key of each Card in the lineup to a random pick from a copy of KPossibilities.
         // Every time a key is assigned, it is removed from the copy; the copy is discarded at the end.
         void assignKeyCards() {
-            vector<string> remaining(KPossibilities, KPossibilities + 25);
+            vector<CardKey> remaining(KPossibilities, KPossibilities + 25);
 
             for (int i = 0; i < 25; i++) {
                 uniform_int_distribution<int> pick(0, remaining.size() - 1);

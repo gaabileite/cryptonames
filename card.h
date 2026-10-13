@@ -7,7 +7,7 @@ using namespace std;
 
 class Card {
     public:
-        string key;
+        CardKey key;
         CardState state;
 
         Character obj_character;
@@ -18,7 +18,7 @@ class Card {
             obj_character = Character();
             characterName = "";
             image_path = "";
-            key = "";
+            key = CardKey::BEIGE;
             state = CardState::SECRET;
         }
 
@@ -26,11 +26,13 @@ class Card {
             obj_character = character;
             characterName = character.name;
             image_path = character.image_path;
-            key = "";
+            key = CardKey::BEIGE;
             state = CardState::SECRET;
         }
 
-        string turnCard() {
+        // Turns the card face up and returns its key.
+        CardKey reveal() {
+            state = CardState::REVEALED;
             return key;
         }
 };
