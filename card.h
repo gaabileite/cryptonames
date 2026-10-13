@@ -1,6 +1,7 @@
 #pragma once
 #include <iostream>
 #include <string>
+#include <algorithm>
 #include "character.h"
 #include "enums.h"
 using namespace std;
@@ -28,6 +29,14 @@ class Card {
             image_path = character.image_path;
             key = CardKey::BEIGE;
             state = CardState::SECRET;
+        }
+
+        // The picture of this card for the given key: the character's folder + the key as file name,
+        // e.g. images/mcu/iron_man_tony_stark/beige.png
+        string imageFor(CardKey key) const {
+            string file = toString(key);
+            transform(file.begin(), file.end(), file.begin(), ::tolower);
+            return image_path + "/" + file + ".png";
         }
 
         // Turns the card face up and returns its key.

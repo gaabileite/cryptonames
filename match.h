@@ -9,7 +9,7 @@ using namespace std;
 // What one player is allowed to see of one card.
 struct CardView {
     string characterName;
-    string image_path;
+    string image;       // picture matching the key this player may see, e.g. images/mcu/iron_man_tony_stark/beige.png
     CardKey key;
     CardState state;
 };
@@ -115,7 +115,8 @@ class Match {
             vector<CardView> view;
             for (const Card& card : grid.lineup) {
                 bool visible = player.isSpy() || card.state == CardState::REVEALED;
-                view.push_back({card.characterName, card.image_path, visible ? card.key : CardKey::BEIGE, card.state});
+                CardKey shown = visible ? card.key : CardKey::BEIGE;
+                view.push_back({card.characterName, card.imageFor(shown), shown, card.state});
             }
             return view;
         }
