@@ -14,7 +14,7 @@ A two-team spy game played on a 5x5 grid of Marvel character cards. Each team (B
 | `data/` | `characters.db`, the characters table. |
 | `assets/images/` | The four coloured cards of each character: `<universe>/<character>/{blue,red,beige,black}.png`. |
 | `third_party/` | Single-header libraries: cpp-httplib and nlohmann/json (both MIT). |
-| `web/` | The front-end, served at `/` by the server (not created yet). |
+| `web/` | The front-end (plain HTML, CSS and JavaScript), served at `/` by the server. |
 
 ## Build and run
 
@@ -26,6 +26,15 @@ make test       # builds and runs the tests
 build/game      # play in the terminal
 build/server    # start the server on http://127.0.0.1:8080
 ```
+
+## Play in the browser
+
+1. Run `build/server` and open http://127.0.0.1:8080 (every player opens it in their own browser).
+2. Each player types a name and picks a free team and role. The game starts when all 4 seats are taken.
+3. Spies see the colour of every card. Guessers click the cards of their team on their turn, and press **End turn** when they are done. Clues are given outside the app.
+4. A guess ends the turn if the card is the other team's or beige. The black card loses the game. The first team to reveal all its cards wins.
+
+The server runs one game; restart it to play again. To let other devices on your network join, run `build/server 8080 0.0.0.0`.
 
 ## Database
 
