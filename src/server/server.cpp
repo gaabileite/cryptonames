@@ -142,6 +142,11 @@ int main(int argc, char* argv[]) {
 
     httplib::Server server;
 
+    // Each browser keeps several connections open, and every open connection holds a worker thread.
+    // With the default (small) pool, the images and the polls of a few players wait seconds in line.
+    server.new_task_queue = [] { return new httplib::ThreadPool(64); };
+    server.set_keep_alive_timeout(2);
+
     server.Get("/api/lobby", endpoint([](const httplib::Request&) {
         json players = json::array(), slots = json::array();
         for (const Player& player : game.lobby.players()) {
