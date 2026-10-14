@@ -287,6 +287,44 @@ void testMatchOutcomes() {
     }
 }
 
+void testForfeit() {
+    // Every player, of either team and either role, can forfeit; the other team wins
+    for (string quitter : {"bs", "bg", "rs", "rg"}) {
+        Match match(fullLobby(), characters());
+        Team team = (quitter[0] == 'b') ? Team::BLUE : Team::RED;
+        CHECK(!match.wasForfeited());
+        try { match.forfeitedBy(); CHECK(false); } catch (const logic_error&) {}
+        match.forfeit(quitter);
+        CHECK(match.isFinished() && match.wasForfeited());
+        CHECK(match.forfeitedBy() == team && match.winner() == otherThan(team));
+    }
+    { // it works when it is NOT their team's turn, and the board stays readable
+        Match match(fullLobby(), characters());
+        Team team = otherThan(match.currentTeam());
+        match.forfeit(spyOf(team));
+        CHECK(match.winner() == otherThan(team));
+        CHECK(match.viewFor("bg").size() == 25);
+        CHECK(match.remaining(Team::BLUE) == 8 && match.remaining(Team::RED) == 8);   // no cards were touched
+    }
+    { // after the end nothing else works, and an unknown player cannot forfeit
+        Match match(fullLobby(), characters());
+        CHECK(rejects([&] { match.forfeit("nobody"); }));
+        CHECK(!match.isFinished());
+        match.forfeit("bg");
+        CHECK(rejects([&] { match.forfeit("rg"); }));                          // already over: the first forfeit stands
+        CHECK(match.forfeitedBy() == Team::BLUE && match.winner() == Team::RED);
+        CHECK(rejects([&] { match.guess(guesserOf(match.currentTeam()), 0); }));
+        CHECK(rejects([&] { match.endTurn(guesserOf(match.currentTeam())); }));
+    }
+    { // a match that ends normally is not a forfeit
+        Match match(fullLobby(), characters());
+        Team team = match.currentTeam();
+        vector<CardView> spy = match.viewFor(spyOf(team));
+        for (int i = 0; i < 25; i++) if (spy[i].key == CardKey::BLACK) match.guess(guesserOf(team), i);
+        CHECK(match.isFinished() && !match.wasForfeited());
+    }
+}
+
 int main() {
     testEnums();
     testLobby();
@@ -295,6 +333,7 @@ int main() {
     testMatchSetupAndViews();
     testMatchPermissions();
     testMatchOutcomes();
+    testForfeit();
 
     if (failures == 0) cout << "All tests passed" << endl;
     else cout << failures << " check(s) failed" << endl;

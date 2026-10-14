@@ -144,9 +144,10 @@
         $('join-btn').disabled = closed;
         $('name').disabled = closed;
         $('join-note').hidden = !closed;
-        $('join-note').textContent = lobby.started
-            ? 'A game is already in progress. Ask whoever runs the server to start a new one.'
-            : (full ? 'The waiting room is full.' : '');
+        $('join-note').textContent = lobby.finished
+            ? 'The last game is over. The room opens again when all its players have left.'
+            : (lobby.started ? 'A game is already in progress. Wait until it is over and its players have left the room.'
+                : (full ? 'The waiting room is full.' : ''));
         renderPlayers($('join-players'), lobby.players);
     }
 
@@ -400,7 +401,9 @@
         const banner = $('banner');
         if (state.finished) {
             banner.className = `banner team-${state.winner}`;
-            banner.textContent = `Team ${NAMES[state.winner]} wins!`;
+            banner.textContent = state.forfeitedBy
+                ? `Team ${NAMES[state.forfeitedBy]} forfeited. Team ${NAMES[state.winner]} wins!`
+                : `Team ${NAMES[state.winner]} wins!`;
         } else {
             banner.className = `banner team-${state.currentTeam}`;
             banner.textContent = `Team ${NAMES[state.currentTeam]}'s turn`;
@@ -410,7 +413,9 @@
 
         // Hint
         let hint;
-        if (state.finished) {
+        if (state.finished && state.forfeitedBy) {
+            hint = state.forfeitedBy === you.team ? 'Your team forfeited.' : 'The other team forfeited.';
+        } else if (state.finished) {
             hint = state.winner === you.team ? 'Your team won.' : 'Your team lost.';
         } else if (isSpy) {
             hint = 'You are the spy: you see every colour. Give your guesser clues outside the app.';
@@ -435,6 +440,20 @@
         // End-turn button: only guessers have it, and only on their team's turn
         $('end-turn').hidden = isSpy || state.finished;
         $('end-turn').disabled = !state.yourTurn;
+        renderActions(state.finished);
+    }
+
+    // Forfeit and leave: any player can give up at any time, or leave the room. A second click confirms.
+    // Leaving a match that is still going on makes the team forfeit, so the confirmation says so.
+    let asking = null;                // null, 'forfeit' or 'leave'
+    let gameFinished = false;
+    let askedFrom = null;             // the button that opened the question, to give the focus back to it
+    function renderActions(finished) {
+        gameFinished = finished;
+        if (finished) asking = null;           // nothing to give up any more, and leaving no longer forfeits
+        $('forfeit-btn').hidden = finished || asking !== null;
+        $('leave-room-btn').hidden = asking !== null;
+        $('confirm-box').hidden = asking === null;
     }
 
     let busy = false;     // one action at a time, so a double click does not guess twice
@@ -469,6 +488,72 @@
             busy = false;
             refreshPlay().catch(() => {});
         }
+    });
+
+    function ask(mode, from) {
+        asking = mode;
+        askedFrom = from;
+        if (mode === 'forfeit') {
+            const other = myTeam === 'BLUE' ? 'Red' : 'Blue';
+            $('confirm-question').textContent = `Give up and let Team ${other} win?`;
+            $('confirm-yes').textContent = 'Yes, forfeit';
+        } else if (mode === 'leave') {
+            $('confirm-question').textContent = 'Leaving the room makes your team forfeit. Leave anyway?';
+            $('confirm-yes').textContent = 'Yes, leave';
+        }
+        renderActions(gameFinished);
+        // keyboard focus goes to the safe option, so a stray Enter does not forfeit or leave
+        $('confirm-no').focus();
+    }
+
+    function stopAsking() {
+        asking = null;
+        renderActions(gameFinished);
+        if (askedFrom) askedFrom.focus();
+    }
+
+    async function leaveTheRoom() {
+        if (busy) return;
+        busy = true;
+        try {
+            await api('POST', '/api/leave');
+        } catch (error) {
+            if (error.status !== 401) {          // 401: the server no longer knows us, which is the same as having left
+                busy = false;
+                asking = null;
+                renderActions(gameFinished);
+                return toast(error.message, true);
+            }
+        }
+        busy = false;
+        asking = null;
+        forgetSeat();
+        refreshJoin().catch(() => {});
+    }
+
+    async function forfeit() {
+        if (busy) return;
+        busy = true;
+        try {
+            await api('POST', '/api/forfeit');
+            toast('Your team forfeited.', true);
+        } catch (error) {
+            toast(error.message, true);
+        } finally {
+            busy = false;
+            asking = null;
+            renderActions(gameFinished);
+            refreshPlay().catch(() => {});
+        }
+    }
+
+    $('forfeit-btn').addEventListener('click', () => ask('forfeit', $('forfeit-btn')));
+    // After the match there is nothing to forfeit, so leaving needs no question
+    $('leave-room-btn').addEventListener('click', () => (gameFinished ? leaveTheRoom() : ask('leave', $('leave-room-btn'))));
+    $('confirm-no').addEventListener('click', stopAsking);
+    $('confirm-yes').addEventListener('click', () => (asking === 'leave' ? leaveTheRoom() : forfeit()));
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && asking) stopAsking();
     });
 
     // ---------- Refresh loop ----------

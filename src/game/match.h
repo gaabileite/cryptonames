@@ -19,6 +19,7 @@ struct CardView {
 //   viewFor(name)         -> the board as that player may see it
 //   guess(name, index)    -> the current team's GUESSER reveals a card
 //   endTurn(name)         -> the current team's GUESSER stops guessing
+//   forfeit(name)         -> a team gives up: any of its players, at any time, and the other team wins
 // Anything not allowed throws invalid_argument with a message that can be shown to the player.
 //
 // Rules: the teams alternate. A GUESSER keeps guessing while they find cards of their own team.
@@ -31,6 +32,8 @@ class Match {
         Team turn;
         MatchState matchState;
         Team winningTeam;
+        bool forfeited;
+        Team forfeitingTeam;
 
         static Team opposite(Team team) {
             return team == Team::BLUE ? Team::RED : Team::BLUE;
@@ -78,6 +81,8 @@ class Match {
             turn = coin(rng()) == 0 ? Team::BLUE : Team::RED;
             matchState = MatchState::IN_PROGRESS;
             winningTeam = turn;
+            forfeited = false;
+            forfeitingTeam = turn;
         }
 
         const vector<Player>& players() const {
@@ -97,6 +102,19 @@ class Match {
                 throw logic_error("The match is not over yet");
             }
             return winningTeam;
+        }
+
+        // Did the match end because a team gave up?
+        bool wasForfeited() const {
+            return forfeited;
+        }
+
+        // The team that gave up. Only when wasForfeited().
+        Team forfeitedBy() const {
+            if (!forfeited) {
+                throw logic_error("Nobody forfeited");
+            }
+            return forfeitingTeam;
         }
 
         // How many cards of the team are still face down.
@@ -149,5 +167,17 @@ class Match {
         void endTurn(const string& name) {
             const Player& player = requireActiveGuesser(name);
             turn = opposite(player.team);
+        }
+
+        // The player's team gives up and the other team wins. Any player of the team can do it (spy or guesser),
+        // at any time of the match, even when it is not their team's turn.
+        void forfeit(const string& name) {
+            if (matchState == MatchState::FINISHED) {
+                throw invalid_argument("The match is already over");
+            }
+            const Player& player = findPlayer(name);
+            forfeited = true;
+            forfeitingTeam = player.team;
+            finish(opposite(player.team));
         }
 };

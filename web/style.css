@@ -296,7 +296,21 @@ button:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
 .card:hover .name,
 .card:focus-visible .name { opacity: 1; }
 
-.actions { display: flex; justify-content: center; margin-top: 20px; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px 16px; margin-top: 20px; }
+
+/* Forfeit and leaving: red outline, and a second step before it counts */
+button.danger {
+    padding: 10px 20px;
+    font-weight: 700;
+    color: var(--error);
+    background: none;
+    border: 2px solid var(--error);
+    border-radius: 8px;
+}
+button.danger:hover { color: var(--bg); background: var(--error); }
+button.danger.solid { color: var(--bg); background: var(--error); }
+button.danger:disabled { opacity: 0.4; cursor: not-allowed; }
+.confirm-box { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px 16px; font-weight: 600; }
 
 .toast {
     position: fixed;

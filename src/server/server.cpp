@@ -11,12 +11,16 @@
 //   POST /api/join       {"name"} -> {"token", ...}
 //   POST /api/seat       {"team", "role"} picks or changes your seat; not while ready      (X-Token)
 //   POST /api/ready      {"ready": true|false}                                             (X-Token)
-//   POST /api/leave      leaves the waiting room                                           (X-Token)
+//   POST /api/leave      leaves the room (see below)                                       (X-Token)
 // Match:
 //   GET  /api/state      the turn, the cards left, the winner, and who you are             (X-Token)
 //   GET  /api/board      the 25 cards as YOU may see them                                  (X-Token)
 //   POST /api/guess      {"index": 0-24} -> {"key"}                                        (X-Token)
 //   POST /api/end-turn                                                                     (X-Token)
+//   POST /api/forfeit    your team gives up (any of its players, any time): the other team wins   (X-Token)
+// Leaving: in the waiting room it just frees your name and seat. During a match it makes your team forfeit (so nobody
+// waits for a player who is gone), and after the match it changes nothing. When the last player has left, the room
+// becomes a new, empty waiting room.
 // /images/... serves assets/images/ (the card pictures) and, if a web/ folder exists, / serves the front-end.
 #include <iostream>
 #include <map>
@@ -180,7 +184,8 @@ int main(int argc, char* argv[]) {
         for (const Slot& slot : game.lobby.openSlots()) {
             slots.push_back({{"team", toString(slot.first)}, {"role", toString(slot.second)}});
         }
-        return json{{"started", game.match != nullptr}, {"totalSeats", game.lobby.totalSeats()},
+        return json{{"started", game.match != nullptr}, {"finished", game.match != nullptr && game.match->isFinished()},
+                    {"totalSeats", game.lobby.totalSeats()},
                     {"players", players}, {"openSlots", slots}};
     }));
 
@@ -200,11 +205,17 @@ int main(int argc, char* argv[]) {
     }));
 
     server.Post("/api/leave", endpoint([](const httplib::Request& req) {
-        requireWaitingRoom();
         string name = memberOf(req).name;
+        if (game.match && !game.match->isFinished()) {
+            game.match->forfeit(name);                   // leaving a match that is still going on is a forfeit
+        }
         game.lobby.leave(name);
         for (auto token = game.nameOfToken.begin(); token != game.nameOfToken.end();) {
             token = token->second == name ? game.nameOfToken.erase(token) : next(token);
+        }
+        if (game.lobby.members().empty()) {              // everybody left: the room opens again for a new game
+            game.match.reset();
+            game.lobby = Lobby();
         }
         return json{{"ok", true}};
     }));
@@ -238,7 +249,10 @@ int main(int argc, char* argv[]) {
             answer["currentTeam"] = toString(match.currentTeam());
             answer["remaining"] = {{"BLUE", match.remaining(Team::BLUE)}, {"RED", match.remaining(Team::RED)}};
             answer["yourTurn"] = !match.isFinished() && you.seat->second == Role::GUESSER && you.seat->first == match.currentTeam();
-            if (match.isFinished()) answer["winner"] = toString(match.winner());
+            if (match.isFinished()) {
+                answer["winner"] = toString(match.winner());
+                answer["forfeitedBy"] = match.wasForfeited() ? json(toString(match.forfeitedBy())) : json(nullptr);
+            }
         }
         return answer;
     }));
@@ -270,6 +284,11 @@ int main(int argc, char* argv[]) {
 
     server.Post("/api/end-turn", endpoint([](const httplib::Request& req) {
         startedMatch().endTurn(memberOf(req).name);
+        return json{{"ok", true}};
+    }));
+
+    server.Post("/api/forfeit", endpoint([](const httplib::Request& req) {
+        startedMatch().forfeit(memberOf(req).name);
         return json{{"ok", true}};
     }));
 

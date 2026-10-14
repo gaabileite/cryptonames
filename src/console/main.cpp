@@ -76,7 +76,7 @@ void playFromConsole(Match& match) {
         cout << "Cards left: BLUE " << match.remaining(Team::BLUE) << ", RED " << match.remaining(Team::RED) << endl;
         printBoard(match.viewFor(guesser));
 
-        cout << "Card number (1-25), 0 to end the turn, s to see the spy's board: ";
+        cout << "Card number (1-25), 0 to end the turn, s to see the spy's board, f to forfeit: ";
         string input;
         if (!getline(cin, input)) {
             throw runtime_error("Input closed before the match ended");
@@ -85,6 +85,12 @@ void playFromConsole(Match& match) {
         try {
             if (input == "s") {
                 printBoard(match.viewFor(nameOf(match, team, Role::SPY)));
+            } else if (input == "f") {
+                cout << "Team " << toString(team) << " gives up and Team " << toString(team == Team::BLUE ? Team::RED : Team::BLUE)
+                     << " wins. Type yes to confirm: ";
+                string answer;
+                getline(cin, answer);
+                if (answer == "yes") match.forfeit(guesser);
             } else if (input == "0") {
                 match.endTurn(guesser);
             } else {
@@ -105,6 +111,7 @@ void playFromConsole(Match& match) {
         }
     }
 
+    if (match.wasForfeited()) cout << "\nTeam " << toString(match.forfeitedBy()) << " forfeited." << endl;
     cout << "\nThe match is over. Team " << toString(match.winner()) << " wins!" << endl;
 }
 
