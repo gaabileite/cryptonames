@@ -74,6 +74,69 @@ void testLobby() {
     CHECK(big.totalSeats() == 10 && big.openSlots().size() == 10);
 }
 
+void testWaitingRoom() {
+    Lobby lobby;
+    lobby.join("  Ana ");
+    CHECK(lobby.members().size() == 1 && lobby.members()[0].name == "Ana");     // trimmed, no seat yet
+    CHECK(!lobby.members()[0].seat && !lobby.members()[0].ready);
+    CHECK(lobby.players().empty() && lobby.openSlots().size() == 4);            // joining takes no seat
+    CHECK(rejects([&] { lobby.join("Ana"); }));                                // duplicate name
+    CHECK(rejects([&] { lobby.join("   "); }));
+    CHECK(rejects([&] { lobby.setReady("Ana", true); }));                      // needs a seat first
+    CHECK(rejects([&] { lobby.chooseSeat("Nobody", Team::BLUE, Role::SPY); }));
+    CHECK(rejects([&] { lobby.setReady("Nobody", true); }));
+
+    lobby.chooseSeat("Ana", Team::BLUE, Role::SPY);
+    CHECK(lobby.openSlots().size() == 3 && !lobby.isOpen(Team::BLUE, Role::SPY));
+    lobby.chooseSeat("Ana", Team::BLUE, Role::SPY);                            // the seat she already has is fine
+    lobby.chooseSeat("Ana", Team::RED, Role::GUESSER);                         // changing frees the old seat
+    CHECK(lobby.isOpen(Team::BLUE, Role::SPY) && !lobby.isOpen(Team::RED, Role::GUESSER));
+
+    lobby.join("Bia");
+    CHECK(rejects([&] { lobby.chooseSeat("Bia", Team::RED, Role::GUESSER); })); // taken by Ana
+    lobby.chooseSeat("Bia", Team::BLUE, Role::SPY);                            // the seat Ana left
+
+    lobby.setReady("Ana", true);
+    CHECK(rejects([&] { lobby.chooseSeat("Ana", Team::BLUE, Role::GUESSER); })); // locked while ready
+    lobby.setReady("Ana", false);
+    lobby.chooseSeat("Ana", Team::BLUE, Role::GUESSER);
+
+    lobby.join("Cris");
+    lobby.join("Dani");
+    CHECK(lobby.isFull() && rejects([&] { lobby.join("Eve"); }));              // only as many players as seats
+    CHECK(!lobby.canStart());
+    lobby.chooseSeat("Cris", Team::RED, Role::SPY);
+    lobby.chooseSeat("Dani", Team::RED, Role::GUESSER);
+    CHECK(lobby.players().size() == 4 && lobby.openSlots().empty());
+    for (string name : {"Ana", "Bia", "Cris"}) lobby.setReady(name, true);
+    CHECK(!lobby.canStart());                                                  // Dani is not ready yet
+    CHECK(rejects([&] { Match match(lobby, characters()); }));
+    lobby.setReady("Dani", true);
+    CHECK(lobby.canStart());
+    lobby.setReady("Cris", false);                                             // anyone can cancel until the match starts
+    CHECK(!lobby.canStart());
+    lobby.setReady("Cris", true);
+
+    Match match(lobby, characters());                                          // starts with the seats they picked
+    CHECK(match.players().size() == 4);
+    CHECK(match.viewFor("Bia").size() == 25);
+
+    // Leaving frees the name and the seat; with unseated players it still cannot start
+    Lobby other;
+    other.join("A"); other.chooseSeat("A", Team::BLUE, Role::SPY); other.setReady("A", true);
+    other.leave("A");
+    CHECK(other.members().empty() && other.isOpen(Team::BLUE, Role::SPY));
+    CHECK(rejects([&] { other.leave("A"); }));
+    other.join("A");                                                           // the name is free again
+    Lobby unseated;
+    for (string name : {"a", "b", "c", "d"}) unseated.join(name);
+    CHECK(unseated.isFull() && !unseated.canStart());
+
+    // addPlayer (console): joins, sits and is ready in one step
+    Lobby console = fullLobby();
+    CHECK(console.canStart());
+}
+
 void testGrid() {
     for (int run = 0; run < 500; run++) {
         Grid grid(characters());
@@ -227,6 +290,7 @@ void testMatchOutcomes() {
 int main() {
     testEnums();
     testLobby();
+    testWaitingRoom();
     testGrid();
     testMatchSetupAndViews();
     testMatchPermissions();

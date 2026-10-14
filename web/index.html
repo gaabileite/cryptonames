@@ -16,32 +16,36 @@
     <div id="connection" class="connection" role="alert" hidden></div>
 
     <main>
-        <!-- Join: pick a name and a seat -->
+        <!-- Join: just a name -->
         <section id="screen-join" hidden>
             <h2>Join the game</h2>
             <form id="join-form" novalidate>
                 <label for="name">Your name</label>
                 <input id="name" name="name" type="text" maxlength="30" autocomplete="nickname" required>
 
-                <fieldset>
-                    <legend>Pick a team and a role</legend>
-                    <div id="seats" class="seats"></div>
-                </fieldset>
-
                 <button id="join-btn" type="submit" class="primary">Join</button>
                 <p id="join-error" class="error" role="alert" hidden></p>
                 <p id="join-note" class="note" hidden></p>
             </form>
 
-            <h3>Players so far</h3>
+            <h3>In the waiting room</h3>
             <ul id="join-players" class="players"></ul>
         </section>
 
-        <!-- Wait: joined, the other seats are still empty -->
+        <!-- Waiting room: pick (and change) team and role, then press ready -->
         <section id="screen-wait" hidden>
-            <h2>Waiting for the other players</h2>
+            <h2>Waiting room</h2>
             <p id="wait-count" class="note"></p>
-            <ul id="wait-players" class="players"></ul>
+
+            <div id="teams" class="teams"></div>
+            <p id="wait-unseated" class="note" hidden></p>
+            <p id="wait-locked" class="note" hidden>You are ready, so your team and role are locked. Cancel ready to change them.</p>
+
+            <div class="wait-actions">
+                <button id="ready-btn" type="button" class="primary" aria-pressed="false">I'm ready</button>
+                <button id="leave-btn" type="button" class="link">Leave the waiting room</button>
+            </div>
+            <p id="wait-error" class="error" role="alert" hidden></p>
         </section>
 
         <!-- Game -->

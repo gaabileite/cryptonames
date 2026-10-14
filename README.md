@@ -30,9 +30,11 @@ build/server    # start the server on http://127.0.0.1:8080
 ## Play in the browser
 
 1. Run `build/server` and open http://127.0.0.1:8080 (every player opens it in their own browser).
-2. Each player types a name and picks a free team and role. The game starts when all 4 seats are taken.
-3. Spies see the colour of every card. Guessers click the cards of their team on their turn, and press **End turn** when they are done. Clues are given outside the app.
-4. A guess ends the turn if the card is the other team's or beige. The black card loses the game. The first team to reveal all its cards wins.
+2. Each player types a name on the start page and joins the waiting room.
+3. In the waiting room everybody picks a team and a role (Blue or Red, Spy or Guesser) and can change it at any time. Seats are taken by one player each.
+4. When you are happy with your seat, press **I'm ready**. Pressing it again cancels it, and your seat is locked while you are ready. The game starts by itself when all 4 seats are taken and everybody is ready.
+5. Spies see the colour of every card. Guessers click the cards of their team on their turn, and press **End turn** when they are done. Clues are given outside the app.
+6. A guess ends the turn if the card is the other team's or beige. The black card loses the game. The first team to reveal all its cards wins. Every card that is picked turns over on every player's screen.
 
 The server runs one game; restart it to play again. To let other devices on your network join, run `build/server 8080 0.0.0.0`.
 

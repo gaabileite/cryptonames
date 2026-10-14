@@ -64,10 +64,10 @@ class Match {
         }
 
     public:
-        // The lobby must be full. pool: every character the board may draw from.
+        // The lobby must be ready to start (see Lobby::canStart). pool: every character the board may draw from.
         Match(const Lobby& lobby, vector<Character> pool) : grid(pool) {
-            if (!lobby.isFull()) {
-                throw invalid_argument("The match cannot start before every seat is taken");
+            if (!lobby.canStart()) {
+                throw invalid_argument("The match cannot start before every seat is taken and everybody is ready");
             }
             participants = lobby.players();
 

@@ -10,6 +10,8 @@
     --accent: #1d1b16;
     --on-accent: #ffffff;
     --error: #b3261e;
+    --ok: #1d7a3a;
+    --on-ok: #ffffff;
     --shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
 }
 
@@ -26,6 +28,8 @@
         --accent: #f1eee4;
         --on-accent: #17160f;
         --error: #f2b8b5;
+        --ok: #6fd08c;
+        --on-ok: #0b2a14;
         --shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
     }
 }
@@ -93,36 +97,68 @@ input[type="text"] {
     border-radius: 8px;
 }
 
-fieldset { margin: 20px 0; padding: 0; border: 0; }
-legend { padding: 0; margin-bottom: 6px; font-weight: 600; }
+/* ---------- Waiting room ---------- */
 
-.seats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-
-.seat { position: relative; margin: 0; font-weight: 400; }
-.seat input {
-    position: absolute;
-    opacity: 0;
-    inset: 0;
-    margin: 0;
-    cursor: pointer;
+.teams {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    max-width: 720px;
 }
-.seat > span {
-    display: block;
-    padding: 12px;
-    text-align: center;
+
+.team-card {
+    padding: 14px;
     background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 6px solid var(--team-color);
+    border-radius: 12px;
+}
+.team-card.team-BLUE { --team-color: var(--blue); }
+.team-card.team-RED { --team-color: var(--red); }
+.team-card h3 { margin: 0 0 4px; font-size: 1.05rem; color: var(--text); }
+
+.slot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    margin-top: 8px;
+    padding: 12px;
+    text-align: left;
+    color: inherit;
+    background: var(--bg);
     border: 2px solid var(--border);
-    border-left-width: 8px;
     border-radius: 10px;
 }
-.seat.team-BLUE > span { border-left-color: var(--blue); }
-.seat.team-RED > span { border-left-color: var(--red); }
-.seat input:checked + span { box-shadow: 0 0 0 3px var(--text); background: var(--bg); font-weight: 700; }
-.seat input:focus-visible + span { outline: 3px solid var(--text); outline-offset: 2px; }
-.seat input:disabled { cursor: not-allowed; }
-.seat input:disabled + span { opacity: 0.45; text-decoration: line-through; }
-.seat .strong { display: block; font-weight: 700; }
-.seat .sub { display: block; font-size: 0.85rem; color: var(--muted); }
+.slot .role { font-weight: 700; }
+.slot .who { flex: 1; text-align: right; color: var(--muted); overflow-wrap: anywhere; }
+.slot:not(:disabled):hover { border-color: var(--team-color); }
+.slot:disabled { cursor: not-allowed; }
+.slot.mine { border-color: var(--text); box-shadow: 0 0 0 2px var(--text); }
+.slot.mine .who { color: var(--text); font-weight: 700; }
+.slot.taken { opacity: 0.75; }
+.slot .badge {
+    padding: 1px 8px;
+    font-size: 0.75rem;
+    font-weight: 800;
+    white-space: nowrap;
+    color: var(--on-ok);
+    background: var(--ok);
+    border-radius: 999px;
+}
+.slot .badge:empty { display: none; }
+
+.wait-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-top: 20px; }
+
+button.link {
+    padding: 4px 0;
+    color: var(--muted);
+    background: none;
+    border: 0;
+    text-decoration: underline;
+}
+button.link:hover { color: var(--text); }
 
 button {
     font: inherit;
@@ -137,6 +173,7 @@ button.primary {
     border-radius: 8px;
 }
 button.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+#join-btn { margin-top: 16px; }
 button:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
 
 .error { margin: 12px 0 0; color: var(--error); font-weight: 600; }
@@ -239,6 +276,26 @@ button:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
 }
 .tag:empty { display: none; }
 
+/* The character's name, in readable size, while the mouse or the keyboard focus is on the card. */
+.name {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 6px 8px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    line-height: 1.2;
+    text-align: center;
+    color: #ffffff;
+    background: rgba(0, 0, 0, 0.8);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+}
+.card:hover .name,
+.card:focus-visible .name { opacity: 1; }
+
 .actions { display: flex; justify-content: center; margin-top: 20px; }
 
 .toast {
@@ -267,10 +324,10 @@ button:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
     .board { grid-template-columns: repeat(2, 1fr); }
     .status { grid-template-columns: 1fr 1fr; }
     .hint { grid-column: 1 / -1; order: 3; }
-    .seats { grid-template-columns: 1fr; }
+    .teams { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .card { transition: none; }
+    .card, .name { transition: none; }
     .card:not(:disabled):hover { transform: none; }
 }

@@ -1,16 +1,19 @@
 // Front-end of the board game. Talks to the JSON API of the server (see src/server/server.cpp).
-// Three screens: join (name + seat), wait (for the other players) and game (board + end-turn button).
+// Three screens: join (just a name), wait (pick a team and a role, then press ready) and game (board + end-turn button).
 // The page asks the server for the state every POLL_MS; everything the player sees comes from the server.
 (() => {
     'use strict';
 
     const POLL_MS = 1500;
+    const FLIP_MS = 220;      // each half of the card-turning animation
     const BASE_TITLE = document.title;
-    const SEATS = [['BLUE', 'SPY'], ['BLUE', 'GUESSER'], ['RED', 'SPY'], ['RED', 'GUESSER']];
-    const NAMES = { BLUE: 'Blue', RED: 'Red', SPY: 'Spy', GUESSER: 'Guesser', BEIGE: 'beige', BLACK: 'black' };
+    const TEAMS = ['BLUE', 'RED'];
+    const ROLES = ['SPY', 'GUESSER'];
+    const NAMES = { BLUE: 'Blue', RED: 'Red', SPY: 'Spy', GUESSER: 'Guesser', BEIGE: 'Beige', BLACK: 'Black' };
 
     const $ = (id) => document.getElementById(id);
     const screens = { join: $('screen-join'), wait: $('screen-wait'), game: $('screen-game') };
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
     // ---------- Token (kept so a page refresh does not lose the seat) ----------
 
@@ -76,6 +79,12 @@
         element.hidden = !message;
     }
 
+    function showError(id, message) {
+        $(id).textContent = message || '';
+        $(id).hidden = !message;
+    }
+
+    // Players that have no seat yet appear without a team.
     function renderPlayers(list, players) {
         list.replaceChildren();
         if (players.length === 0) {
@@ -88,27 +97,22 @@
             const item = document.createElement('li');
             const name = document.createElement('strong');
             name.textContent = player.name;      // textContent: a name can never inject HTML
-            item.append(chip(player.team), name, ` ${NAMES[player.role]}`);
+            if (player.team) item.append(chip(player.team), name, ` ${NAMES[player.role]}`);
+            else item.append(name);
             list.append(item);
         }
     }
 
     function renderWhoAmI(me) {
         const element = $('whoami');
-        element.replaceChildren(chip(me.team), `${me.name} · ${NAMES[me.role]}`);
+        if (me.team) element.replaceChildren(chip(me.team), `${me.name} · ${NAMES[me.role]}`);
+        else element.replaceChildren(me.name);
         element.hidden = false;
-    }
-
-    function forgetSeat() {
-        token = null;
-        storage.set(null);
-        $('whoami').hidden = true;
-        lastRendered = {};
-        document.title = BASE_TITLE;
     }
 
     // Skips a render when the data is the same as last time, so the page does not flicker.
     let lastRendered = {};
+    let lastStates = null;          // the state of each card the last time the board was drawn (null: not drawn yet)
     function changed(screen, data) {
         const serialized = JSON.stringify(data);
         if (lastRendered[screen] === serialized) return false;
@@ -116,76 +120,52 @@
         return true;
     }
 
-    // ---------- Join screen ----------
-
-    const seatInputs = {};
-    (function buildSeats() {
-        for (const [team, role] of SEATS) {
-            const label = document.createElement('label');
-            label.className = `seat team-${team}`;
-            const input = document.createElement('input');
-            input.type = 'radio';
-            input.name = 'seat';
-            input.value = `${team}|${role}`;
-            const box = document.createElement('span');
-            const title = document.createElement('span');
-            title.className = 'strong';
-            title.textContent = `${NAMES[team]} ${NAMES[role]}`;
-            const sub = document.createElement('span');
-            sub.className = 'sub';
-            box.append(title, sub);
-            label.append(input, box);
-            $('seats').append(label);
-            seatInputs[input.value] = { input, sub };
-        }
-    })();
-
-    function showJoinError(message) {
-        $('join-error').textContent = message || '';
-        $('join-error').hidden = !message;
+    function resetRendering() {
+        lastRendered = {};
+        lastStates = null;
     }
+
+    function forgetSeat() {
+        token = null;
+        storage.set(null);
+        $('whoami').hidden = true;
+        resetRendering();
+        document.title = BASE_TITLE;
+    }
+
+    // ---------- Join screen: just a name ----------
 
     function renderJoin(lobby) {
         show('join');
         if (!changed('join', lobby)) return;
 
-        const open = {};
-        for (const slot of lobby.openSlots) {
-            const key = `${slot.team}|${slot.role}`;
-            open[key] = (open[key] || 0) + 1;
-        }
-        for (const key of Object.keys(seatInputs)) {
-            const { input, sub } = seatInputs[key];
-            input.disabled = lobby.started || !open[key];
-            if (input.disabled) input.checked = false;
-            sub.textContent = open[key] ? '' : 'taken';
-        }
-        $('join-btn').disabled = lobby.started;
-        $('name').disabled = lobby.started;
-        $('join-note').hidden = !lobby.started;
-        $('join-note').textContent = lobby.started ? 'A game is already in progress. Ask whoever runs the server to start a new one.' : '';
+        const full = lobby.players.length >= lobby.totalSeats;
+        const closed = lobby.started || full;
+        $('join-btn').disabled = closed;
+        $('name').disabled = closed;
+        $('join-note').hidden = !closed;
+        $('join-note').textContent = lobby.started
+            ? 'A game is already in progress. Ask whoever runs the server to start a new one.'
+            : (full ? 'The waiting room is full.' : '');
         renderPlayers($('join-players'), lobby.players);
     }
 
     $('join-form').addEventListener('submit', async (event) => {
         event.preventDefault();
         const name = $('name').value.trim();
-        const seat = document.querySelector('input[name="seat"]:checked');
-        if (!name) return showJoinError('Type your name.');
-        if (!seat) return showJoinError('Pick a team and a role.');
+        if (!name) return showError('join-error', 'Type your name.');
 
-        const [team, role] = seat.value.split('|');
-        showJoinError('');
+        showError('join-error', '');
         $('join-btn').disabled = true;
         try {
-            const joined = await api('POST', '/api/join', { name, team, role });
+            const joined = await api('POST', '/api/join', { name });
             token = joined.token;
             storage.set(token);
-            lastRendered = {};
+            resetRendering();
             await refreshPlay();
         } catch (error) {
-            showJoinError(error.message);
-            lastRendered = {};
+            showError('join-error', error.message);
+            resetRendering();
             refreshJoin().catch(() => {});
         } finally {
             $('join-btn').disabled = false;
@@ -196,15 +176,123 @@
         renderJoin(await api('GET', '/api/lobby'));
     }
 
-    // ---------- Wait screen ----------
+    // ---------- Waiting room: pick a team and a role, then press ready ----------
 
-    function renderWait(lobby) {
+    const slots = {};     // 'BLUE|SPY' -> { button, who, badge }
+    (function buildTeams() {
+        for (const team of TEAMS) {
+            const card = document.createElement('div');
+            card.className = `team-card team-${team}`;
+            const title = document.createElement('h3');
+            title.textContent = `${NAMES[team]} team`;
+            card.append(title);
+            for (const role of ROLES) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'slot';
+                button.dataset.team = team;
+                button.dataset.role = role;
+                const roleName = document.createElement('span');
+                roleName.className = 'role';
+                roleName.textContent = NAMES[role];
+                const who = document.createElement('span');
+                who.className = 'who';
+                const badge = document.createElement('span');
+                badge.className = 'badge';
+                button.append(roleName, who, badge);
+                card.append(button);
+                slots[`${team}|${role}`] = { button, who, badge };
+            }
+            $('teams').append(card);
+        }
+    })();
+
+    let me = null;        // who I am in the waiting room, from the last state
+
+    function renderWait(lobby, you) {
         show('wait');
-        if (!changed('wait', lobby)) return;
-        const total = lobby.players.length + lobby.openSlots.length;
-        $('wait-count').textContent = `${lobby.players.length} of ${total} players have joined. The game starts when every seat is taken.`;
-        renderPlayers($('wait-players'), lobby.players);
+        me = you;
+        if (!changed('wait', { lobby, you })) return;
+
+        const players = lobby.players;
+        const total = lobby.totalSeats;
+        const ready = players.filter((player) => player.ready).length;
+        const unseated = players.filter((player) => !player.team);
+
+        // Who sits where
+        const occupant = {};
+        for (const player of players) {
+            if (player.team) occupant[`${player.team}|${player.role}`] = player;
+        }
+        for (const key of Object.keys(slots)) {
+            const { button, who, badge } = slots[key];
+            const player = occupant[key];
+            const mine = !!player && player.name === you.name;
+            button.classList.toggle('mine', mine);
+            button.classList.toggle('taken', !!player && !mine);
+            button.setAttribute('aria-pressed', mine ? 'true' : 'false');
+            who.textContent = player ? (mine ? `${player.name} (you)` : player.name) : 'Open';
+            badge.textContent = player && player.ready ? '✓ Ready' : '';
+            // Taken by someone else, or locked because I am ready
+            button.disabled = (!!player && !mine) || you.ready;
+        }
+
+        // Status line
+        let status;
+        if (players.length < total) status = `${players.length} of ${total} players have joined. Waiting for ${total - players.length} more.`;
+        else if (unseated.length > 0) status = 'Everybody needs to pick a team and a role.';
+        else if (ready < total) status = `${ready} of ${total} players are ready. The game starts when everyone is ready.`;
+        else status = 'Everyone is ready. Starting...';
+        $('wait-count').textContent = status;
+
+        $('wait-unseated').hidden = unseated.length === 0;
+        $('wait-unseated').textContent = `Still choosing a team: ${unseated.map((player) => player.name).join(', ')}`;
+        $('wait-locked').hidden = !you.ready;
+
+        // The ready button needs a seat
+        const readyButton = $('ready-btn');
+        readyButton.disabled = !you.team;
+        readyButton.textContent = you.ready ? 'Cancel ready' : "I'm ready";
+        readyButton.setAttribute('aria-pressed', you.ready ? 'true' : 'false');
     }
+
+    // One action at a time in the waiting room as well, so quick double clicks do not collide.
+    let waitBusy = false;
+    async function waitAction(request) {
+        if (waitBusy) return;
+        waitBusy = true;
+        showError('wait-error', '');
+        try {
+            await request();
+        } catch (error) {
+            if (error.status === 401) throw error;
+            showError('wait-error', error.message);
+        } finally {
+            waitBusy = false;
+            refreshPlay().catch(() => {});
+        }
+    }
+
+    $('teams').addEventListener('click', (event) => {
+        const button = event.target.closest('button.slot');
+        if (!button || button.disabled) return;
+        waitAction(() => api('POST', '/api/seat', { team: button.dataset.team, role: button.dataset.role })).catch(() => {});
+    });
+
+    $('ready-btn').addEventListener('click', () => {
+        if (!me) return;
+        waitAction(() => api('POST', '/api/ready', { ready: !me.ready })).catch(() => {});
+    });
+
+    $('leave-btn').addEventListener('click', async () => {
+        try {
+            await api('POST', '/api/leave');
+        } catch (error) {
+            if (error.status !== 401) return showError('wait-error', error.message);
+        }
+        forgetSeat();
+        refreshJoin().catch(() => {});
+    });
 
     // ---------- Game screen ----------
 
@@ -218,15 +306,84 @@
             image.alt = '';
             const tag = document.createElement('span');
             tag.className = 'tag';
-            button.append(image, tag);
+            const name = document.createElement('span');     // shown on hover, see style.css
+            name.className = 'name';
+            button.append(image, tag, name);
             $('board').append(button);
             cardButtons.push(button);
         }
     })();
 
+    let latest = null;                // { state, cards } of the last render: what every card should look like now
+    const flipping = new Set();       // indexes of the cards that are being turned over
+
     function describeCard(card, isSpy) {
         if (card.state === 'REVEALED') return `${card.name}, revealed: ${NAMES[card.key]}`;
         return isSpy ? `${card.name}, secret: ${NAMES[card.key]}` : card.name;
+    }
+
+    // Draws one card the way the latest state says.
+    function paintCard(index) {
+        const { state, cards } = latest;
+        const card = cards[index];
+        const isSpy = state.you.role === 'SPY';
+        const button = cardButtons[index];
+
+        const image = button.querySelector('img');
+        const source = `/${card.image}`;
+        if (image.getAttribute('src') !== source) image.setAttribute('src', source);
+        image.alt = card.name;
+        button.querySelector('.name').textContent = card.name;
+
+        button.className = `card key-${card.key}${card.state === 'REVEALED' ? ' revealed' : ''}${isSpy ? ' spy-view' : ''}`;
+        button.disabled = !(state.yourTurn && card.state === 'SECRET');
+        button.setAttribute('aria-label', describeCard(card, isSpy));
+
+        // The colour as text too, so it does not depend on seeing the colours.
+        const tag = button.querySelector('.tag');
+        if (card.state === 'REVEALED') tag.textContent = `${NAMES[card.key]} ✓`;
+        else tag.textContent = isSpy ? NAMES[card.key] : '';
+    }
+
+    function canAnimate() {
+        return typeof Element.prototype.animate === 'function'
+            && !document.hidden
+            && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    }
+
+    // Resolves when the picture is ready (or fails, or takes too long), so the turn never shows an empty card.
+    function preload(source) {
+        return new Promise((resolve) => {
+            const image = new Image();
+            image.onload = image.onerror = () => resolve();
+            image.src = source;
+            setTimeout(resolve, 1000);
+        });
+    }
+
+    // Turns the card over: it spins edge-on, the other face is drawn, and it spins back.
+    async function flipCard(index) {
+        flipping.add(index);
+        const button = cardButtons[index];
+        const spin = (from, to, easing) => button.animate(
+            [{ transform: `perspective(900px) rotateY(${from}deg)` }, { transform: `perspective(900px) rotateY(${to}deg)` }],
+            { duration: FLIP_MS, easing, fill: 'forwards' });
+        try {
+            const loading = preload(`/${latest.cards[index].image}`);
+            const first = spin(0, 90, 'ease-in');
+            await Promise.race([first.finished, sleep(FLIP_MS + 300)]);
+            await loading;
+            paintCard(index);                        // edge-on, so the change is not seen
+            const second = spin(-90, 0, 'ease-out');
+            first.cancel();
+            await Promise.race([second.finished, sleep(FLIP_MS + 300)]);
+            second.cancel();
+        } catch (error) {
+            // an animation that was cancelled: the final state is drawn below
+        } finally {
+            flipping.delete(index);
+            paintCard(index);
+        }
     }
 
     function renderGame(state, board) {
@@ -234,9 +391,10 @@
         document.title = state.yourTurn ? `Your turn - ${BASE_TITLE}` : BASE_TITLE;
         if (!changed('game', { state, board })) return;
 
-        const me = state.you;
-        const isSpy = me.role === 'SPY';
-        renderWhoAmI(me);
+        latest = { state, cards: board.cards };
+        const you = state.you;
+        const isSpy = you.role === 'SPY';
+        renderWhoAmI(you);
 
         // Banner
         const banner = $('banner');
@@ -253,7 +411,7 @@
         // Hint
         let hint;
         if (state.finished) {
-            hint = state.winner === me.team ? 'Your team won.' : 'Your team lost.';
+            hint = state.winner === you.team ? 'Your team won.' : 'Your team lost.';
         } else if (isSpy) {
             hint = 'You are the spy: you see every colour. Give your guesser clues outside the app.';
         } else if (state.yourTurn) {
@@ -263,22 +421,15 @@
         }
         $('hint').textContent = hint;
 
-        // Board
+        // Board: a card that was secret and is now revealed is turned over (for every player), the others are just redrawn.
+        const turnedOver = lastStates
+            ? board.cards.filter((card) => card.state === 'REVEALED' && lastStates[card.index] === 'SECRET').map((card) => card.index)
+            : [];
+        lastStates = board.cards.map((card) => card.state);
         for (const card of board.cards) {
-            const button = cardButtons[card.index];
-            const image = button.querySelector('img');
-            const source = `/${card.image}`;
-            if (image.getAttribute('src') !== source) image.setAttribute('src', source);
-            image.alt = card.name;
-
-            button.className = `card key-${card.key}${card.state === 'REVEALED' ? ' revealed' : ''}${isSpy ? ' spy-view' : ''}`;
-            button.disabled = !(state.yourTurn && card.state === 'SECRET');
-            button.setAttribute('aria-label', describeCard(card, isSpy));
-
-            // The colour as text too, so it does not depend on seeing the colours.
-            const tag = button.querySelector('.tag');
-            if (card.state === 'REVEALED') tag.textContent = `${NAMES[card.key]} ✓`;
-            else tag.textContent = isSpy ? NAMES[card.key] : '';
+            if (flipping.has(card.index)) continue;        // its animation draws it with the latest data
+            if (turnedOver.includes(card.index) && canAnimate()) flipCard(card.index);
+            else paintCard(card.index);
         }
 
         // End-turn button: only guessers have it, and only on their team's turn
@@ -327,7 +478,7 @@
         myTeam = state.you.team;
         if (!state.started) {
             renderWhoAmI(state.you);
-            renderWait(await api('GET', '/api/lobby'));
+            renderWait(await api('GET', '/api/lobby'), state.you);
             return;
         }
         renderGame(state, await api('GET', '/api/board'));
