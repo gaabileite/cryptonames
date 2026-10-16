@@ -7,13 +7,16 @@
 // Players identify themselves with the token they get from /api/join, sent in the X-Token header.
 //
 // Waiting room (until every seat is taken and everybody is ready, then the match starts by itself):
-//   GET  /api/lobby      who is in the waiting room (team and role are null until picked, plus "ready") and the open seats
+//   GET  /api/lobby      who is in the waiting room (team and role are null until picked, plus "ready"), the open seats,
+//                        the universes with their character count and whether they are selected, and the turn timer setting
 //   POST /api/join       {"name"} -> {"token", ...}
 //   POST /api/seat       {"team", "role"} picks or changes your seat; not while ready      (X-Token)
+//   POST /api/timer      {"enabled": true|false, "seconds": 15-600} turn time limit; cancels everybody's ready  (X-Token)
 //   POST /api/ready      {"ready": true|false}                                             (X-Token)
+//   POST /api/universes  {"universe": "MCU", "selected": true|false} switches one universe on or off; cancels everybody's ready (X-Token)
 //   POST /api/leave      leaves the room (see below)                                       (X-Token)
 // Match:
-//   GET  /api/state      the turn, the cards left, the winner, and who you are             (X-Token)
+//   GET  /api/state      the turn, the cards left, the time left, the winner, and who you are  (X-Token)
 //   GET  /api/board      the 25 cards as YOU may see them                                  (X-Token)
 //   POST /api/guess      {"index": 0-24} -> {"key"}                                        (X-Token)
 //   POST /api/end-turn                                                                     (X-Token)
@@ -22,6 +25,7 @@
 // waits for a player who is gone), and after the match it changes nothing. When the last player has left, the room
 // becomes a new, empty waiting room.
 // /images/... serves assets/images/ (the card pictures) and, if a web/ folder exists, / serves the front-end.
+#include <algorithm>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -44,12 +48,16 @@ struct HttpError : runtime_error {
     HttpError(int status, const string& message) : runtime_error(message), status(status) {}
 };
 
+// A game needs this many characters to fill the board.
+const size_t cardsOnBoard = 25;
+
 // The whole game lives here. Requests run on several threads, so every handler holds the lock.
 struct GameServer {
     mutex lock;
     vector<Character> characters;
     Lobby lobby;
     unique_ptr<Match> match;            // created when every seat is taken and everybody is ready
+    map<M_Universe, int> universeSizes; // how many characters each universe has (only the ones that have any)
     map<string, string> nameOfToken;
 };
 
@@ -80,10 +88,12 @@ void requireWaitingRoom() {
     }
 }
 
+// The match, with its clock brought up to date: when the time of a turn has run out, the turn has already passed.
 Match& startedMatch() {
     if (!game.match) {
         throw HttpError(409, "The game has not started yet");
     }
+    game.match->advanceClock();
     return *game.match;
 }
 
@@ -110,6 +120,42 @@ json memberJson(const Member& member) {
         answer["role"] = toString(member.seat->second);
     }
     return answer;
+}
+
+// The waiting room starts with every universe that has characters selected.
+Lobby newLobby() {
+    set<M_Universe> all;
+    for (const auto& universe : game.universeSizes) all.insert(universe.first);
+    Lobby lobby;
+    lobby.chooseUniverses(all);
+    return lobby;
+}
+
+int charactersIn(const set<M_Universe>& universes) {
+    int count = 0;
+    for (M_Universe universe : universes) {
+        auto size = game.universeSizes.find(universe);
+        if (size != game.universeSizes.end()) count += size->second;
+    }
+    return count;
+}
+
+json timerJson() {
+    const TurnTimer& timer = game.lobby.timer();
+    return {{"enabled", timer.enabled}, {"seconds", timer.seconds},
+            {"min", Lobby::minTurnSeconds}, {"max", Lobby::maxTurnSeconds}};
+}
+
+json universesJson() {
+    // The biggest universe first
+    vector<pair<M_Universe, int>> sorted(game.universeSizes.begin(), game.universeSizes.end());
+    stable_sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+    json list = json::array();
+    for (const auto& universe : sorted) {
+        list.push_back({{"name", toString(universe.first)}, {"count", universe.second},
+                        {"selected", game.lobby.universes().count(universe.first) > 0}});
+    }
+    return list;
 }
 
 bool booleanField(const json& body, const string& field) {
@@ -164,10 +210,14 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     // Checked now because the Match is created when the last player is ready, and it needs 25 characters to fill the board.
-    if (game.characters.size() < 25) {
-        cerr << "Error: the database needs at least 25 characters, found " << game.characters.size() << endl;
+    if (game.characters.size() < cardsOnBoard) {
+        cerr << "Error: the database needs at least " << cardsOnBoard << " characters, found " << game.characters.size() << endl;
         return 1;
     }
+    for (const Character& character : game.characters) {
+        game.universeSizes[character.universe]++;
+    }
+    game.lobby = newLobby();
 
     httplib::Server server;
 
@@ -186,7 +236,9 @@ int main(int argc, char* argv[]) {
         }
         return json{{"started", game.match != nullptr}, {"finished", game.match != nullptr && game.match->isFinished()},
                     {"totalSeats", game.lobby.totalSeats()},
-                    {"players", players}, {"openSlots", slots}};
+                    {"players", players}, {"openSlots", slots},
+                    {"universes", universesJson()}, {"charactersSelected", charactersIn(game.lobby.universes())},
+                    {"charactersNeeded", cardsOnBoard}, {"timer", timerJson()}};
     }));
 
     server.Post("/api/join", endpoint([](const httplib::Request& req) {
@@ -215,7 +267,7 @@ int main(int argc, char* argv[]) {
         }
         if (game.lobby.members().empty()) {              // everybody left: the room opens again for a new game
             game.match.reset();
-            game.lobby = Lobby();
+            game.lobby = newLobby();
         }
         return json{{"ok", true}};
     }));
@@ -226,6 +278,50 @@ int main(int argc, char* argv[]) {
         string name = memberOf(req).name;
         game.lobby.chooseSeat(name, teamFromString(textField(body, "team")), roleFromString(textField(body, "role")));
         return memberJson(memberOf(req));
+    }));
+
+    server.Post("/api/universes", endpoint([](const httplib::Request& req) {
+        json body = bodyOf(req);
+        requireWaitingRoom();
+        memberOf(req);                                   // only somebody in the waiting room can change it
+        M_Universe universe = universeFromString(textField(body, "universe"));      // throws if it does not exist
+        bool selected = booleanField(body, "selected");
+        if (!game.universeSizes.count(universe)) {
+            throw HttpError(400, "There are no characters in " + toString(universe));
+        }
+
+        // One universe at a time, applied to what the server has now, so two players clicking together do not undo each other.
+        set<M_Universe> chosen = game.lobby.universes();
+        if (selected) chosen.insert(universe); else chosen.erase(universe);
+        if (chosen.empty()) {
+            throw HttpError(400, "Pick at least one universe");
+        }
+        int available = charactersIn(chosen);
+        if (available < (int)cardsOnBoard) {
+            throw HttpError(400, "Those universes only have " + to_string(available) + " characters, and a game needs at least " + to_string(cardsOnBoard));
+        }
+        game.lobby.chooseUniverses(chosen);              // cancels everybody's ready if the choice changed
+        return json{{"universes", universesJson()}, {"charactersSelected", available}, {"charactersNeeded", cardsOnBoard}};
+    }));
+
+    server.Post("/api/timer", endpoint([](const httplib::Request& req) {
+        json body = bodyOf(req);
+        requireWaitingRoom();
+        memberOf(req);                                   // only somebody in the waiting room can change it
+        bool enabled = booleanField(body, "enabled");
+        int seconds = game.lobby.timer().seconds;        // not sent: keep the seconds that were chosen
+        if (body.contains("seconds")) {
+            if (!body["seconds"].is_number_integer()) {
+                throw HttpError(400, "The seconds must be a whole number");
+            }
+            long long wanted = body["seconds"].get<long long>();      // not an int: a huge number must not wrap around into a valid one
+            if (wanted < Lobby::minTurnSeconds || wanted > Lobby::maxTurnSeconds) {
+                throw HttpError(400, "A turn can last from " + to_string(Lobby::minTurnSeconds) + " to " + to_string(Lobby::maxTurnSeconds) + " seconds");
+            }
+            seconds = (int)wanted;
+        }
+        game.lobby.chooseTimer(enabled, seconds);        // cancels everybody's ready if the setting changed
+        return json{{"timer", timerJson()}};
     }));
 
     server.Post("/api/ready", endpoint([](const httplib::Request& req) {
@@ -244,8 +340,10 @@ int main(int argc, char* argv[]) {
         const Member& you = memberOf(req);
         json answer = {{"started", game.match != nullptr}, {"you", memberJson(you)}};
         if (game.match) {
-            Match& match = *game.match;
+            Match& match = startedMatch();                // brings the clock up to date first
             answer["finished"] = match.isFinished();
+            answer["timer"] = {{"enabled", match.hasTimeLimit()}, {"seconds", match.turnLimitSeconds()},
+                               {"millisecondsLeft", match.hasTimeLimit() && !match.isFinished() ? json(match.millisecondsLeft()) : json(nullptr)}};
             answer["currentTeam"] = toString(match.currentTeam());
             answer["remaining"] = {{"BLUE", match.remaining(Team::BLUE)}, {"RED", match.remaining(Team::RED)}};
             answer["yourTurn"] = !match.isFinished() && you.seat->second == Role::GUESSER && you.seat->first == match.currentTeam();

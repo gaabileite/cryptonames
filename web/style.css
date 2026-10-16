@@ -149,6 +149,69 @@ input[type="text"] {
 }
 .slot .badge:empty { display: none; }
 
+.universes { max-width: 720px; margin: 20px 0 0; padding: 0; border: 0; }
+.universes legend { padding: 0; margin-bottom: 8px; font-weight: 700; }
+.universe-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.universe-list .uni { position: relative; margin: 0; font-weight: 400; }
+.universe-list .uni input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.universe-list .uni > span.pill {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    background: var(--surface);
+    border: 2px solid var(--border);
+    border-radius: 999px;
+}
+.universe-list .uni .check { width: 1em; color: var(--muted); }
+.universe-list .uni .num { font-size: 0.85rem; color: var(--muted); }
+.universe-list .uni input:checked + .pill { border-color: var(--text); background: var(--bg); font-weight: 700; }
+.universe-list .uni input:checked + .pill .check::before { content: "✓"; color: var(--ok); }
+.universe-list .uni input:focus-visible + .pill { outline: 3px solid var(--blue); outline-offset: 2px; }
+.universe-list .uni input:disabled { cursor: not-allowed; }
+.universe-list .uni input:disabled + .pill { opacity: 0.55; }
+.timer-setup { max-width: 720px; margin: 20px 0 0; padding: 0; border: 0; }
+.timer-setup legend { padding: 0; margin-bottom: 8px; font-weight: 700; }
+.check-row { display: flex; align-items: center; gap: 10px; margin: 0; font-weight: 400; cursor: pointer; }
+.check-row input { width: 1.2rem; height: 1.2rem; margin: 0; }
+.timer-seconds { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 10px; }
+.timer-seconds label { margin: 0; font-weight: 400; }
+.timer-seconds input[type="number"] {
+    width: 6.5rem;
+    padding: 8px 10px;
+    font: inherit;
+    color: inherit;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+.timer-seconds input:disabled { opacity: 0.5; }
+.presets { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.presets button {
+    padding: 6px 12px;
+    color: inherit;
+    background: var(--surface);
+    border: 2px solid var(--border);
+    border-radius: 999px;
+}
+.presets button:hover:not(:disabled) { border-color: var(--text); }
+.presets button.on { border-color: var(--text); font-weight: 700; }
+.presets button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* The countdown of the turn, during the match */
+.turn-timer {
+    width: fit-content;
+    margin: 10px auto 0;
+    padding: 4px 18px;
+    font-size: 1.5rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    background: var(--surface);
+    border: 2px solid var(--border);
+    border-radius: 999px;
+}
+.turn-timer.low { color: var(--error); border-color: var(--error); }
+.note.small { margin: 4px 0 0; font-size: 0.85rem; }
 .wait-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-top: 20px; }
 
 button.link {

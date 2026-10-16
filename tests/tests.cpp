@@ -137,6 +137,167 @@ void testWaitingRoom() {
     CHECK(console.canStart());
 }
 
+void testUniverses() {
+    // 30 characters from MCU, 30 from FOX X-MEN, 10 from FANTASTIC FOUR
+    vector<Character> mixed;
+    for (int i = 0; i < 30; i++) mixed.push_back(Character("M" + to_string(i), M_CharacterType::PERSON, M_Universe::MCU, "images/m" + to_string(i)));
+    for (int i = 0; i < 30; i++) mixed.push_back(Character("X" + to_string(i), M_CharacterType::PERSON, M_Universe::FOX_XMEN, "images/x" + to_string(i)));
+    for (int i = 0; i < 10; i++) mixed.push_back(Character("F" + to_string(i), M_CharacterType::PERSON, M_Universe::FANTASTIC_FOUR, "images/f" + to_string(i)));
+
+    Lobby lobby = fullLobby();
+    CHECK(lobby.universes().size() == 7 && lobby.universes().count(M_Universe::MCU));     // everything, until somebody picks
+    CHECK(lobby.canStart());
+
+    CHECK(rejects([&] { lobby.chooseUniverses({}); }));                                  // at least one
+    CHECK(lobby.canStart());                                                             // a rejected choice changes nothing
+
+    lobby.chooseUniverses(lobby.universes());                                            // the same choice again: nobody is un-readied
+    CHECK(lobby.canStart());
+
+    lobby.chooseUniverses({M_Universe::FOX_XMEN});
+    CHECK(lobby.universes().size() == 1 && lobby.universes().count(M_Universe::FOX_XMEN));
+    CHECK(!lobby.canStart());                                                            // a new choice cancels everybody's ready
+    for (const Member& member : lobby.members()) CHECK(!member.ready);
+    CHECK(rejects([&] { Match match(lobby, mixed); }));
+    for (string name : {"bs", "bg", "rs", "rg"}) lobby.setReady(name, true);
+
+    { // the board only has characters of the chosen universe
+        Match match(lobby, mixed);
+        for (const CardView& card : match.viewFor("bg")) CHECK(card.characterName[0] == 'X');
+    }
+    for (int round = 0; round < 100; round++) {                                          // two universes: both can show up, never the third
+        lobby.chooseUniverses({M_Universe::MCU, M_Universe::FOX_XMEN});
+        for (string name : {"bs", "bg", "rs", "rg"}) lobby.setReady(name, true);
+        Match match(lobby, mixed);
+        for (const CardView& card : match.viewFor("bs")) CHECK(card.characterName[0] == 'M' || card.characterName[0] == 'X');
+    }
+
+    // too few characters in the chosen universes: the match refuses to start
+    lobby.chooseUniverses({M_Universe::FANTASTIC_FOUR});
+    for (string name : {"bs", "bg", "rs", "rg"}) lobby.setReady(name, true);
+    CHECK(rejects([&] { Match match(lobby, mixed); }));
+    lobby.chooseUniverses({M_Universe::FANTASTIC_FOUR, M_Universe::MCU});
+    for (string name : {"bs", "bg", "rs", "rg"}) lobby.setReady(name, true);
+    Match match(lobby, mixed);
+    CHECK(match.viewFor("bs").size() == 25);
+}
+
+void testTimer() {
+    typedef Match::Clock Clock;
+    auto at = [](Clock::time_point start, int seconds) { return start + chrono::seconds(seconds); };
+
+    // ---- the waiting room setting
+    Lobby lobby = fullLobby();
+    CHECK(!lobby.timer().enabled && lobby.timer().seconds == 60);                  // off, 60 s once turned on
+    CHECK(rejects([&] { lobby.chooseTimer(true, Lobby::minTurnSeconds - 1); }));
+    CHECK(rejects([&] { lobby.chooseTimer(true, Lobby::maxTurnSeconds + 1); }));
+    CHECK(rejects([&] { lobby.chooseTimer(false, 5); }));                          // the seconds must be valid even when off
+    CHECK(rejects([&] { lobby.chooseTimer(true, -3); }));
+    CHECK(lobby.canStart() && !lobby.timer().enabled);                             // rejected choices change nothing
+    lobby.chooseTimer(false, 60);                                                  // the same choice: nobody is un-readied
+    CHECK(lobby.canStart());
+    lobby.chooseTimer(true, 90);
+    CHECK(lobby.timer().enabled && lobby.timer().seconds == 90 && !lobby.canStart());   // a new choice cancels everybody's ready
+    for (string name : {"bs", "bg", "rs", "rg"}) lobby.setReady(name, true);
+    lobby.chooseTimer(true, Lobby::minTurnSeconds);                                // the limits are allowed
+    lobby.chooseTimer(true, Lobby::maxTurnSeconds);
+    lobby.chooseTimer(false, 120);                                                 // off, but remembers the seconds
+    CHECK(!lobby.timer().enabled && lobby.timer().seconds == 120);
+
+    // ---- no timer: time never matters
+    {
+        Clock::time_point start = Clock::now();
+        Match match(fullLobby(), characters(), start);
+        CHECK(!match.hasTimeLimit() && match.turnLimitSeconds() == 0);
+        Team team = match.currentTeam();
+        match.advanceClock(at(start, 100000));
+        CHECK(match.currentTeam() == team);
+        try { match.millisecondsLeft(start); CHECK(false); } catch (const logic_error&) {}
+    }
+
+    // ---- with a timer of 30 s
+    Lobby timed = fullLobby();
+    timed.chooseTimer(true, 30);
+    for (string name : {"bs", "bg", "rs", "rg"}) timed.setReady(name, true);
+    {
+        Clock::time_point start = Clock::now();
+        Match match(timed, characters(), start);
+        Team team = match.currentTeam(), other = otherThan(team);
+        CHECK(match.hasTimeLimit() && match.turnLimitSeconds() == 30);
+        CHECK(match.millisecondsLeft(start) == 30000);
+        CHECK(match.millisecondsLeft(at(start, 12)) == 18000);
+        CHECK(match.millisecondsLeft(at(start, 99)) == 0);                         // never negative
+
+        match.advanceClock(at(start, 29));
+        CHECK(match.currentTeam() == team);                                        // not yet
+        match.advanceClock(at(start, 30));
+        CHECK(match.currentTeam() == other);                                       // time is up: the turn passes
+        CHECK(match.millisecondsLeft(at(start, 30)) == 30000);                     // and the new turn has all its time
+        CHECK(match.millisecondsLeft(at(start, 45)) == 15000);
+        match.advanceClock(at(start, 59));
+        CHECK(match.currentTeam() == other);
+        match.advanceClock(at(start, 60));
+        CHECK(match.currentTeam() == team);
+        match.advanceClock(at(start, 60));                                         // calling it again changes nothing
+        CHECK(match.currentTeam() == team);
+        CHECK(!match.isFinished() && match.remaining(Team::BLUE) == 8 && match.remaining(Team::RED) == 8);   // no card is touched
+    }
+    { // nobody looked at the clock for a long time: it is as if somebody had been watching it
+        Clock::time_point start = Clock::now();
+        Match match(timed, characters(), start);
+        Team team = match.currentTeam();
+        match.advanceClock(at(start, 30 * 5 + 7));                                 // five full turns went by: an odd number
+        CHECK(match.currentTeam() == otherThan(team));
+        CHECK(match.millisecondsLeft(at(start, 30 * 5 + 7)) == 23000);             // and 7 s of the sixth turn are gone
+        match.advanceClock(at(start, 30 * 6 + 1));
+        CHECK(match.currentTeam() == team);                                        // six full turns: back to the first team
+    }
+    { // a guess after the time is up is a guess in the other team's turn
+        Clock::time_point start = Clock::now();
+        Match match(timed, characters(), start);
+        Team team = match.currentTeam();
+        CHECK(rejects([&] { match.guess(guesserOf(team), 0, at(start, 31)); }));   // too late for them
+        CHECK(match.currentTeam() == otherThan(team));
+        CHECK(match.remaining(Team::BLUE) == 8 && match.remaining(Team::RED) == 8);
+        match.guess(guesserOf(otherThan(team)), 0, at(start, 31));                 // but the other team can play
+        CHECK(match.viewFor("bs")[0].state == CardState::REVEALED);               // and their guess counted
+    }
+    { // ending the turn, or a wrong guess, gives the next team a full turn; a right guess gives no extra time
+        Clock::time_point start = Clock::now();
+        Match match(timed, characters(), start);
+        Team team = match.currentTeam(), other = otherThan(team);
+        vector<CardView> spy = match.viewFor(spyOf(team));
+        int mine = -1, mine2 = -1, beige = -1;
+        for (int i = 0; i < 25; i++) {
+            if (spy[i].key == keyOf(team)) (mine < 0 ? mine : mine2) = i;
+            if (spy[i].key == CardKey::BEIGE) beige = i;
+        }
+        match.guess(guesserOf(team), mine, at(start, 20));                         // right: the turn goes on...
+        CHECK(match.currentTeam() == team && match.millisecondsLeft(at(start, 20)) == 10000);   // ...and the clock was not reset
+        match.guess(guesserOf(team), mine2, at(start, 25));
+        CHECK(match.millisecondsLeft(at(start, 25)) == 5000);
+        match.guess(guesserOf(team), beige, at(start, 28));                        // wrong: the turn passes
+        CHECK(match.currentTeam() == other && match.millisecondsLeft(at(start, 28)) == 30000);
+        match.endTurn(guesserOf(other), at(start, 40));                            // ending it also starts the next one fresh
+        CHECK(match.currentTeam() == team && match.millisecondsLeft(at(start, 40)) == 30000);
+        match.advanceClock(at(start, 69));
+        CHECK(match.currentTeam() == team);
+        match.advanceClock(at(start, 70));
+        CHECK(match.currentTeam() == other);
+    }
+    { // after the end of the match the clock stops
+        Clock::time_point start = Clock::now();
+        Match match(timed, characters(), start);
+        Team team = match.currentTeam();
+        match.forfeit(guesserOf(team));
+        Team winner = match.winner();
+        match.advanceClock(at(start, 1000));
+        CHECK(match.winner() == winner && match.isFinished());
+        try { match.millisecondsLeft(at(start, 1)); CHECK(false); } catch (const logic_error&) {}
+        CHECK(rejects([&] { match.endTurn(guesserOf(match.currentTeam()), at(start, 2)); }));
+    }
+}
+
 void testGrid() {
     for (int run = 0; run < 500; run++) {
         Grid grid(characters());
@@ -329,6 +490,8 @@ int main() {
     testEnums();
     testLobby();
     testWaitingRoom();
+    testUniverses();
+    testTimer();
     testGrid();
     testMatchSetupAndViews();
     testMatchPermissions();

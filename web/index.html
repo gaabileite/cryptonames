@@ -39,6 +39,24 @@
 
             <div id="teams" class="teams"></div>
             <p id="wait-unseated" class="note" hidden></p>
+            <fieldset class="universes">
+                <legend>Universes in this game</legend>
+                <div id="universe-list" class="universe-list"></div>
+                <p id="universe-count" class="note"></p>
+                <p class="note small">Anybody in the waiting room can change this. Changing it cancels everybody's ready.</p>
+            </fieldset>
+
+            <fieldset class="timer-setup">
+                <legend>Turn timer</legend>
+                <label class="check-row"><input id="timer-on" type="checkbox"> Limit how long each turn can take</label>
+                <div class="timer-seconds">
+                    <label for="timer-seconds">Seconds per turn</label>
+                    <input id="timer-seconds" type="number" inputmode="numeric" min="15" max="600" step="5" value="60">
+                    <span id="timer-presets" class="presets"></span>
+                </div>
+                <p id="timer-note" class="note small"></p>
+            </fieldset>
+
             <p id="wait-locked" class="note" hidden>You are ready, so your team and role are locked. Cancel ready to change them.</p>
 
             <div class="wait-actions">
@@ -51,6 +69,7 @@
         <!-- Game -->
         <section id="screen-game" hidden>
             <div id="banner" class="banner"></div>
+            <div id="turn-timer" class="turn-timer" role="timer" aria-label="Time left in this turn" hidden></div>
             <div class="status">
                 <div id="score-BLUE" class="score team-BLUE"></div>
                 <p id="hint" class="hint"></p>

@@ -9,6 +9,7 @@
     const BASE_TITLE = document.title;
     const TEAMS = ['BLUE', 'RED'];
     const ROLES = ['SPY', 'GUESSER'];
+    const UNIVERSE_NAMES = { 'MCU': 'MCU', 'FOX X-MEN': 'Fox X-Men', 'SONY SPIDER-MAN': 'Sony Spider-Man', 'FANTASTIC FOUR': 'Fantastic Four', 'THROUGH THE SPIDERVERSE': 'Through the Spider-Verse', 'COMICS': 'Comics', 'VENOM': 'Venom' };
     const NAMES = { BLUE: 'Blue', RED: 'Red', SPY: 'Spy', GUESSER: 'Guesser', BEIGE: 'Beige', BLACK: 'Black' };
 
     const $ = (id) => document.getElementById(id);
@@ -208,6 +209,105 @@
         }
     })();
 
+    // Universes: one checkbox per universe that has characters, built the first time the server tells us which they are.
+    const universeBoxes = {};     // 'MCU' -> { input, num }
+    function buildUniverses(list) {
+        for (const universe of list) {
+            const label = document.createElement('label');
+            label.className = 'uni';
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.value = universe.name;
+            const pill = document.createElement('span');
+            pill.className = 'pill';
+            const check = document.createElement('span');
+            check.className = 'check';
+            check.setAttribute('aria-hidden', 'true');
+            const name = document.createElement('span');
+            name.textContent = UNIVERSE_NAMES[universe.name] || universe.name;
+            const num = document.createElement('span');
+            num.className = 'num';
+            pill.append(check, name, num);
+            label.append(input, pill);
+            $('universe-list').append(label);
+            universeBoxes[universe.name] = { input, num };
+        }
+    }
+
+    function renderUniverses(lobby) {
+        if (Object.keys(universeBoxes).length === 0) buildUniverses(lobby.universes);
+        for (const universe of lobby.universes) {
+            const { input, num } = universeBoxes[universe.name];
+            input.checked = universe.selected;
+            // the last universes that still make a full board cannot be switched off
+            const needed = lobby.charactersNeeded;
+            const cannotTurnOff = universe.selected && lobby.charactersSelected - universe.count < needed;
+            input.disabled = cannotTurnOff;
+            input.title = cannotTurnOff ? `Without these characters there are fewer than ${needed}, and a game needs ${needed}.` : '';
+            num.textContent = `${universe.count} characters`;
+        }
+        $('universe-count').textContent = `${lobby.charactersSelected} characters selected. A game needs at least ${lobby.charactersNeeded}.`;
+    }
+
+    // Turn timer setup: a checkbox, the seconds, and a few quick choices.
+    const PRESETS = [[30, '30 s'], [60, '1 min'], [120, '2 min'], [300, '5 min']];
+    const presetButtons = [];
+    (function buildPresets() {
+        for (const [seconds, label] of PRESETS) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = label;
+            button.dataset.seconds = seconds;
+            $('timer-presets').append(button);
+            presetButtons.push(button);
+        }
+    })();
+
+    function formatSeconds(total) {
+        const minutes = Math.floor(total / 60), seconds = total % 60;
+        return minutes === 0 ? `${seconds} seconds` : (seconds === 0 ? `${minutes} min` : `${minutes} min ${seconds} s`);
+    }
+
+    function renderTimerSetup(lobby) {
+        const timer = lobby.timer;
+        $('timer-on').checked = timer.enabled;
+        const seconds = $('timer-seconds');
+        seconds.min = timer.min;
+        seconds.max = timer.max;
+        seconds.disabled = !timer.enabled;
+        if (document.activeElement !== seconds) seconds.value = timer.seconds;    // never overwrite what somebody is typing
+        for (const button of presetButtons) {
+            button.disabled = !timer.enabled;
+            button.classList.toggle('on', timer.enabled && Number(button.dataset.seconds) === timer.seconds);
+        }
+        $('timer-note').textContent = timer.enabled
+            ? `Each turn lasts at most ${formatSeconds(timer.seconds)} (from ${timer.min} to ${timer.max} seconds). When the time runs out, the turn passes to the other team. Changing this cancels everybody's ready.`
+            : "No time limit: a turn lasts as long as the team needs. Anybody can turn the timer on, and doing so cancels everybody's ready.";
+    }
+
+    $('timer-on').addEventListener('change', () => {
+        waitAction(() => api('POST', '/api/timer', { enabled: $('timer-on').checked })).catch(() => {});
+    });
+
+    $('timer-seconds').addEventListener('change', () => {
+        const input = $('timer-seconds');
+        const seconds = Number(input.value);
+        if (input.value.trim() === '' || !Number.isInteger(seconds) || seconds < Number(input.min) || seconds > Number(input.max)) {
+            showError('wait-error', `A turn can last from ${input.min} to ${input.max} seconds.`);
+            delete lastRendered.wait;          // put the value of the server back
+            input.blur();
+            refreshPlay().catch(() => {});
+            return;
+        }
+        waitAction(() => api('POST', '/api/timer', { enabled: $('timer-on').checked, seconds })).catch(() => {});
+    });
+
+    $('timer-presets').addEventListener('click', (event) => {
+        const button = event.target.closest('button');
+        if (!button || button.disabled) return;
+        waitAction(() => api('POST', '/api/timer', { enabled: true, seconds: Number(button.dataset.seconds) })).catch(() => {});
+    });
+
     let me = null;        // who I am in the waiting room, from the last state
 
     function renderWait(lobby, you) {
@@ -250,6 +350,9 @@
         $('wait-unseated').textContent = `Still choosing a team: ${unseated.map((player) => player.name).join(', ')}`;
         $('wait-locked').hidden = !you.ready;
 
+        renderUniverses(lobby);
+        renderTimerSetup(lobby);
+
         // The ready button needs a seat
         const readyButton = $('ready-btn');
         readyButton.disabled = !you.team;
@@ -270,6 +373,7 @@
             showError('wait-error', error.message);
         } finally {
             waitBusy = false;
+            delete lastRendered.wait;        // redraw from the server's data, which also puts back anything that was rejected
             refreshPlay().catch(() => {});
         }
     }
@@ -293,6 +397,12 @@
         }
         forgetSeat();
         refreshJoin().catch(() => {});
+    });
+
+    // Only the universe that was clicked is sent, so a page that is a moment out of date cannot undo what somebody else just did.
+    $('universe-list').addEventListener('change', (event) => {
+        const input = event.target;
+        waitAction(() => api('POST', '/api/universes', { universe: input.value, selected: input.checked })).catch(() => {});
     });
 
     // ---------- Game screen ----------
@@ -387,10 +497,42 @@
         }
     }
 
+    // The countdown of the turn. The server says how many milliseconds are left, and this counts down from there;
+    // the time that matters is always the server's, so this is only what the player sees.
+    let turnDeadline = null;          // performance.now() value at which the turn ends
+    let timeUpRefreshFor = null;      // the deadline for which the refresh at 0 was already asked
+    function updateTimer(timer, finished) {
+        const element = $('turn-timer');
+        if (!timer || !timer.enabled || finished || timer.millisecondsLeft === null) {
+            turnDeadline = null;
+            element.hidden = true;
+            return;
+        }
+        turnDeadline = performance.now() + timer.millisecondsLeft;
+        element.hidden = false;
+        paintTimer();
+    }
+
+    function paintTimer() {
+        if (turnDeadline === null) return;
+        const element = $('turn-timer');
+        const left = Math.max(0, turnDeadline - performance.now());
+        const seconds = Math.ceil(left / 1000);
+        element.textContent = left === 0 ? "Time's up!" : `⏱ ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+        element.classList.toggle('low', seconds <= 10);
+        if (left === 0 && timeUpRefreshFor !== turnDeadline) {
+            timeUpRefreshFor = turnDeadline;            // the server passes the turn by itself: just go and look
+            setTimeout(() => refreshPlay().catch(() => {}), 300);
+        }
+    }
+    setInterval(paintTimer, 250);
+
     function renderGame(state, board) {
         show('game');
         document.title = state.yourTurn ? `Your turn - ${BASE_TITLE}` : BASE_TITLE;
-        if (!changed('game', { state, board })) return;
+        updateTimer(state.timer, state.finished);
+        const { timer, ...stable } = state;       // the time left changes with every poll, which must not redraw the board
+        if (!changed('game', { state: stable, board })) return;
 
         latest = { state, cards: board.cards };
         const you = state.you;

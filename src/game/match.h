@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <stdexcept>
+#include <chrono>
 #include "lobby.h"
 #include "grid.h"
 using namespace std;
@@ -20,18 +21,28 @@ struct CardView {
 //   guess(name, index)    -> the current team's GUESSER reveals a card
 //   endTurn(name)         -> the current team's GUESSER stops guessing
 //   forfeit(name)         -> a team gives up: any of its players, at any time, and the other team wins
+//   advanceClock()        -> with a time limit, passes the turn when the time of a turn has run out
 // Anything not allowed throws invalid_argument with a message that can be shown to the player.
 //
 // Rules: the teams alternate. A GUESSER keeps guessing while they find cards of their own team.
 // A card of the other team or a BEIGE card ends the turn; the BLACK card loses the game on the spot.
 // The first team to reveal all of its cards wins.
+// With a time limit (chosen in the waiting room) each turn can last that many seconds, counted from the moment the turn
+// begins; guessing right does not give more time. When it runs out the turn passes to the other team. Nothing runs by
+// itself: whoever drives the match calls advanceClock(), and guess() and endTurn() do it first.
 class Match {
+    public:
+        typedef chrono::steady_clock Clock;
+
+    private:
     private:
         vector<Player> participants;
         Grid grid;
         Team turn;
         MatchState matchState;
         Team winningTeam;
+        int turnSeconds;                  // 0: no time limit
+        Clock::time_point turnStartedAt;
         bool forfeited;
         Team forfeitingTeam;
 
@@ -61,14 +72,30 @@ class Match {
             return player;
         }
 
+        // Only the characters of the universes the lobby chose.
+        static vector<Character> allowedCharacters(const Lobby& lobby, const vector<Character>& pool) {
+            vector<Character> allowed;
+            for (const Character& character : pool) {
+                if (lobby.universes().count(character.universe)) allowed.push_back(character);
+            }
+            return allowed;
+        }
+
+        // The turn goes to the other team and its time starts over.
+        void passTurn(Clock::time_point now) {
+            turn = opposite(turn);
+            turnStartedAt = now;
+        }
+
         void finish(Team winner) {
             winningTeam = winner;
             matchState = MatchState::FINISHED;
         }
 
     public:
-        // The lobby must be ready to start (see Lobby::canStart). pool: every character the board may draw from.
-        Match(const Lobby& lobby, vector<Character> pool) : grid(pool) {
+        // The lobby must be ready to start (see Lobby::canStart). pool: every character there is; the board draws
+        // only from the universes the lobby chose, and throws if those have fewer than 25 characters.
+        Match(const Lobby& lobby, const vector<Character>& pool, Clock::time_point now = Clock::now()) : grid(allowedCharacters(lobby, pool)) {
             if (!lobby.canStart()) {
                 throw invalid_argument("The match cannot start before every seat is taken and everybody is ready");
             }
@@ -81,6 +108,8 @@ class Match {
             turn = coin(rng()) == 0 ? Team::BLUE : Team::RED;
             matchState = MatchState::IN_PROGRESS;
             winningTeam = turn;
+            turnSeconds = lobby.timer().enabled ? lobby.timer().seconds : 0;
+            turnStartedAt = now;
             forfeited = false;
             forfeitingTeam = turn;
         }
@@ -117,6 +146,36 @@ class Match {
             return forfeitingTeam;
         }
 
+        bool hasTimeLimit() const {
+            return turnSeconds > 0;
+        }
+
+        // How many seconds a turn can last. 0 without a time limit.
+        int turnLimitSeconds() const {
+            return turnSeconds;
+        }
+
+        // Milliseconds left of the current turn (never negative). Only with a time limit and while the match is going on.
+        long long millisecondsLeft(Clock::time_point now = Clock::now()) const {
+            if (!hasTimeLimit() || isFinished()) {
+                throw logic_error("There is no turn timer running");
+            }
+            long long left = chrono::duration_cast<chrono::milliseconds>(chrono::seconds(turnSeconds) - (now - turnStartedAt)).count();
+            return left < 0 ? 0 : left;
+        }
+
+        // Passes the turn to the other team once for every whole time limit that went by since the turn began, as if
+        // somebody had been watching the clock. Does nothing without a time limit or after the end of the match.
+        void advanceClock(Clock::time_point now = Clock::now()) {
+            if (!hasTimeLimit() || isFinished()) return;
+            Clock::duration limit = chrono::seconds(turnSeconds);
+            Clock::duration elapsed = now - turnStartedAt;
+            if (elapsed < limit) return;
+            long long periods = elapsed / limit;
+            if (periods % 2 == 1) turn = opposite(turn);
+            turnStartedAt += limit * periods;
+        }
+
         // How many cards of the team are still face down.
         int remaining(Team team) const {
             int count = 0;
@@ -140,7 +199,8 @@ class Match {
         }
 
         // Reveals the card at index (0-24) and returns its key.
-        CardKey guess(const string& name, int index) {
+        CardKey guess(const string& name, int index, Clock::time_point now = Clock::now()) {
+            advanceClock(now);                    // a guess that comes after the time is up is for the next team's turn
             const Player& player = requireActiveGuesser(name);
             if (index < 0 || index >= 25) {
                 throw invalid_argument("The card must be between 0 and 24");
@@ -159,14 +219,15 @@ class Match {
             } else if (remaining(other) == 0) {
                 finish(other);
             } else if (key != keyOf(player.team)) {
-                turn = other;
+                passTurn(now);
             }
             return key;
         }
 
-        void endTurn(const string& name) {
-            const Player& player = requireActiveGuesser(name);
-            turn = opposite(player.team);
+        void endTurn(const string& name, Clock::time_point now = Clock::now()) {
+            advanceClock(now);
+            requireActiveGuesser(name);
+            passTurn(now);
         }
 
         // The player's team gives up and the other team wins. Any player of the team can do it (spy or guesser),
