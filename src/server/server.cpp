@@ -16,9 +16,10 @@
 //   POST /api/universes  {"universe": "MCU", "selected": true|false} switches one universe on or off; cancels everybody's ready (X-Token)
 //   POST /api/leave      leaves the room (see below)                                       (X-Token)
 // Match:
-//   GET  /api/state      the turn, the cards left, the time left, the winner, and who you are  (X-Token)
+//   GET  /api/state      the turn, the cards left, the time left, the clue and tries left, the winner, who you are  (X-Token)
 //   GET  /api/board      the 25 cards as YOU may see them                                  (X-Token)
-//   POST /api/guess      {"index": 0-24} -> {"key"}                                        (X-Token)
+//   POST /api/clue       {"text": "1-2 words", "number": n} the SPY's clue of the turn            (X-Token)
+//   POST /api/guess      {"index": 0-24} -> {"key"}   only after the clue; every guess is a try   (X-Token)
 //   POST /api/end-turn                                                                     (X-Token)
 //   POST /api/forfeit    your team gives up (any of its players, any time): the other team wins   (X-Token)
 // Leaving: in the waiting room it just frees your name and seat. During a match it makes your team forfeit (so nobody
@@ -138,6 +139,11 @@ int charactersIn(const set<M_Universe>& universes) {
         if (size != game.universeSizes.end()) count += size->second;
     }
     return count;
+}
+
+json clueJson(const Clue& clue) {
+    return {{"team", toString(clue.team)}, {"text", clue.text}, {"number", clue.number},
+            {"bonusTries", clue.bonusTries}, {"found", clue.found}};
 }
 
 json timerJson() {
@@ -346,7 +352,20 @@ int main(int argc, char* argv[]) {
                                {"millisecondsLeft", match.hasTimeLimit() && !match.isFinished() ? json(match.millisecondsLeft()) : json(nullptr)}};
             answer["currentTeam"] = toString(match.currentTeam());
             answer["remaining"] = {{"BLUE", match.remaining(Team::BLUE)}, {"RED", match.remaining(Team::RED)}};
-            answer["yourTurn"] = !match.isFinished() && you.seat->second == Role::GUESSER && you.seat->first == match.currentTeam();
+            bool onTurn = !match.isFinished() && you.seat->first == match.currentTeam();
+            answer["yourTurn"] = onTurn && you.seat->second == Role::GUESSER;                       // the guesser of the team on turn
+            answer["canGiveClue"] = onTurn && you.seat->second == Role::SPY && !match.hasClue();
+            answer["canGuess"] = onTurn && you.seat->second == Role::GUESSER && match.hasClue();
+            json current = nullptr;
+            if (!match.isFinished() && match.hasClue()) {
+                current = clueJson(match.currentClue());
+                current["triesLeft"] = match.triesRemaining();
+            }
+            answer["clue"] = current;
+            json history = json::array();
+            for (const Clue& clue : match.clueHistory()) history.push_back(clueJson(clue));
+            answer["clues"] = history;
+            answer["extraTries"] = {{"BLUE", match.pendingExtraTries(Team::BLUE)}, {"RED", match.pendingExtraTries(Team::RED)}};
             if (match.isFinished()) {
                 answer["winner"] = toString(match.winner());
                 answer["forfeitedBy"] = match.wasForfeited() ? json(toString(match.forfeitedBy())) : json(nullptr);
@@ -364,6 +383,21 @@ int main(int argc, char* argv[]) {
                              {"key", toString(card.key)}, {"state", toString(card.state)}});
         }
         return json{{"cards", cards}};
+    }));
+
+    server.Post("/api/clue", endpoint([](const httplib::Request& req) {
+        const Member& you = memberOf(req);
+        json body = bodyOf(req);
+        string text = textField(body, "text");
+        if (!body.contains("number") || !body["number"].is_number_integer()) {
+            throw HttpError(400, "Missing whole-number field: number");
+        }
+        long long number = body["number"].get<long long>();    // not an int: a huge number must not wrap around into a valid one
+        if (number < 1 || number > 25) {
+            throw HttpError(400, "The number must be from 1 to the cards your team still has to find");
+        }
+        startedMatch().giveClue(you.name, text, (int)number);
+        return json{{"ok", true}};
     }));
 
     server.Post("/api/guess", endpoint([](const httplib::Request& req) {

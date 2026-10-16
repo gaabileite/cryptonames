@@ -70,6 +70,19 @@
         <section id="screen-game" hidden>
             <div id="banner" class="banner"></div>
             <div id="turn-timer" class="turn-timer" role="timer" aria-label="Time left in this turn" hidden></div>
+            <div id="clue-bar" class="clue-bar" aria-live="polite"></div>
+            <form id="clue-form" class="clue-form" novalidate hidden>
+                <label for="clue-text">Your clue <span class="note">(1 or 2 words)</span></label>
+                <div class="clue-row">
+                    <input id="clue-text" type="text" maxlength="40" autocomplete="off" autocapitalize="characters" spellcheck="false">
+                    <label for="clue-number" class="sr-only">Number of cards</label>
+                    <select id="clue-number" aria-label="Number of cards that fit the clue"></select>
+                    <button id="clue-btn" type="submit" class="primary">Send clue</button>
+                </div>
+                <p id="clue-extra" class="note small" hidden></p>
+                <p id="clue-error" class="error" role="alert" hidden></p>
+            </form>
+
             <div class="status">
                 <div id="score-BLUE" class="score team-BLUE"></div>
                 <p id="hint" class="hint"></p>
@@ -77,6 +90,11 @@
             </div>
 
             <div id="board" class="board"></div>
+
+            <details id="clue-log" class="clue-log" open>
+                <summary>Clues so far</summary>
+                <ol id="clue-list" class="clue-list"></ol>
+            </details>
 
             <div class="actions">
                 <button id="end-turn" type="button" class="primary" hidden>End turn</button>

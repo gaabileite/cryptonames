@@ -36,6 +36,13 @@ string guesserOf(Team team) { return team == Team::BLUE ? "bg" : "rg"; }
 string spyOf(Team team) { return team == Team::BLUE ? "bs" : "rs"; }
 Team otherThan(Team team) { return team == Team::BLUE ? Team::RED : Team::BLUE; }
 
+// The SPY of the team on turn gives a clue; by default it fits every card the team still has to find.
+void clueFor(Match& match, int number = -1, Match::Clock::time_point now = Match::Clock::now()) {
+    Team team = match.currentTeam();
+    if (number < 0) number = match.remaining(team);
+    match.giveClue(spyOf(team), "TEST CLUE", number, now);
+}
+
 void testEnums() {
     for (string s : {"MCU", "FOX X-MEN", "FANTASTIC FOUR", "COMICS", "VENOM", "SONY SPIDER-MAN", "THROUGH THE SPIDERVERSE"}) {
         CHECK(toString(universeFromString(s)) == s);
@@ -259,7 +266,8 @@ void testTimer() {
         CHECK(rejects([&] { match.guess(guesserOf(team), 0, at(start, 31)); }));   // too late for them
         CHECK(match.currentTeam() == otherThan(team));
         CHECK(match.remaining(Team::BLUE) == 8 && match.remaining(Team::RED) == 8);
-        match.guess(guesserOf(otherThan(team)), 0, at(start, 31));                 // but the other team can play
+        clueFor(match, 3, at(start, 31));                                          // the other team's turn: their spy gives the clue
+        match.guess(guesserOf(otherThan(team)), 0, at(start, 31));                 // and their guesser can play
         CHECK(match.viewFor("bs")[0].state == CardState::REVEALED);               // and their guess counted
     }
     { // ending the turn, or a wrong guess, gives the next team a full turn; a right guess gives no extra time
@@ -272,12 +280,14 @@ void testTimer() {
             if (spy[i].key == keyOf(team)) (mine < 0 ? mine : mine2) = i;
             if (spy[i].key == CardKey::BEIGE) beige = i;
         }
+        clueFor(match, 5, at(start, 3));                                           // the clue takes part of the 30 s too
         match.guess(guesserOf(team), mine, at(start, 20));                         // right: the turn goes on...
         CHECK(match.currentTeam() == team && match.millisecondsLeft(at(start, 20)) == 10000);   // ...and the clock was not reset
         match.guess(guesserOf(team), mine2, at(start, 25));
         CHECK(match.millisecondsLeft(at(start, 25)) == 5000);
         match.guess(guesserOf(team), beige, at(start, 28));                        // wrong: the turn passes
         CHECK(match.currentTeam() == other && match.millisecondsLeft(at(start, 28)) == 30000);
+        clueFor(match, 2, at(start, 29));
         match.endTurn(guesserOf(other), at(start, 40));                            // ending it also starts the next one fresh
         CHECK(match.currentTeam() == team && match.millisecondsLeft(at(start, 40)) == 30000);
         match.advanceClock(at(start, 69));
@@ -295,6 +305,183 @@ void testTimer() {
         CHECK(match.winner() == winner && match.isFinished());
         try { match.millisecondsLeft(at(start, 1)); CHECK(false); } catch (const logic_error&) {}
         CHECK(rejects([&] { match.endTurn(guesserOf(match.currentTeam()), at(start, 2)); }));
+    }
+}
+
+// The indexes of the cards with that key, as the spy sees them.
+vector<int> cardsWith(const Match& match, const string& spy, CardKey key) {
+    vector<int> found;
+    vector<CardView> view = match.viewFor(spy);
+    for (int i = 0; i < 25; i++) if (view[i].key == key) found.push_back(i);
+    return found;
+}
+
+void testClues() {
+    typedef Match::Clock Clock;
+    auto at = [](Clock::time_point start, int seconds) { return start + chrono::seconds(seconds); };
+
+    // ---- the text of the clue
+    CHECK(cleanClueText("FIRE") == "FIRE");
+    CHECK(cleanClueText("  ice   cream \t") == "ice cream");                    // spaces around and between the words are cleaned
+    CHECK(cleanClueText("spider-man") == "spider-man");                          // a hyphen does not make two words
+    CHECK(rejects([] { cleanClueText(""); }));
+    CHECK(rejects([] { cleanClueText("   \t "); }));
+    CHECK(rejects([] { cleanClueText("one two three"); }));                      // at most 2 words
+    CHECK(cleanClueText("two\nwords") == "two words");                           // a line break is a space
+    CHECK(rejects([] { cleanClueText(string("a") + char(7) + "b"); }));          // no other control characters
+    CHECK(rejects([] { cleanClueText(string(41, 'x')); }));                      // too long
+    CHECK(cleanClueText(string(40, 'x')).size() == 40);
+
+    // ---- who may give it, when, and which number
+    {
+        Match match(fullLobby(), characters());
+        Team team = match.currentTeam(), other = otherThan(team);
+        CHECK(!match.hasClue() && match.triesRemaining() == 0 && match.clueHistory().empty());
+        try { match.currentClue(); CHECK(false); } catch (const logic_error&) {}
+        CHECK(rejects([&] { match.giveClue(guesserOf(team), "FIRE", 3); }));     // only the spy
+        CHECK(rejects([&] { match.giveClue(spyOf(other), "FIRE", 3); }));        // only the team on turn
+        CHECK(rejects([&] { match.giveClue("nobody", "FIRE", 3); }));
+        CHECK(rejects([&] { match.giveClue(spyOf(team), "too many words", 3); }));
+        CHECK(rejects([&] { match.giveClue(spyOf(team), "", 3); }));
+        CHECK(rejects([&] { match.giveClue(spyOf(team), "FIRE", 0); }));         // from 1...
+        CHECK(rejects([&] { match.giveClue(spyOf(team), "FIRE", -2); }));
+        CHECK(rejects([&] { match.giveClue(spyOf(team), "FIRE", 9); }));         // ...to the cards the team still has (8)
+        CHECK(!match.hasClue());                                                 // rejected clues change nothing
+        CHECK(rejects([&] { match.guess(guesserOf(team), 0); }));                // no guessing before the clue
+
+        match.giveClue(spyOf(team), "  FIRE  ", 3);
+        CHECK(match.hasClue() && match.currentClue().text == "FIRE" && match.currentClue().number == 3);
+        CHECK(match.currentClue().team == team && match.currentClue().bonusTries == 0 && match.currentClue().found == 0);
+        CHECK(match.triesRemaining() == 3 && match.clueHistory().size() == 1);
+        CHECK(rejects([&] { match.giveClue(spyOf(team), "WATER", 2); }));        // one clue per turn
+        CHECK(match.currentClue().text == "FIRE");
+        CHECK(match.currentTeam() == team);                                      // giving it does not pass the turn
+    }
+
+    // ---- the example: FIRE 3, one good try and then a wrong card; the next clue SUNSHINE 2 has 2 + 2 tries
+    {
+        Match match(fullLobby(), characters());
+        Team team = match.currentTeam(), other = otherThan(team);
+        vector<int> mine = cardsWith(match, spyOf(team), keyOf(team));
+        vector<int> beige = cardsWith(match, spyOf(team), CardKey::BEIGE);
+        vector<int> theirs = cardsWith(match, spyOf(team), keyOf(other));
+
+        match.giveClue(spyOf(team), "FIRE", 3);
+        CHECK(match.guess(guesserOf(team), mine[0]) == keyOf(team));
+        CHECK(match.triesRemaining() == 2 && match.currentClue().found == 1 && match.currentTeam() == team);
+        CHECK(match.guess(guesserOf(team), beige[0]) == CardKey::BEIGE);         // the second try is a beige card
+        CHECK(match.currentTeam() == other && !match.hasClue());                 // the turn is skipped
+        CHECK(match.pendingExtraTries(team) == 2);                               // 3 cards in the clue, 1 found: 2 are carried over
+        CHECK(match.pendingExtraTries(other) == 0);
+        CHECK(match.clueHistory()[0].found == 1 && match.clueHistory()[0].number == 3);
+
+        match.giveClue(spyOf(other), "OCEAN", 1);                                // the other team plays and ends its turn
+        match.endTurn(guesserOf(other));
+        CHECK(match.currentTeam() == team && match.pendingExtraTries(team) == 2); // the carry-over waits for the next clue
+
+        match.giveClue(spyOf(team), "SUNSHINE", 2);
+        CHECK(match.triesRemaining() == 4);                                      // 2 for SUNSHINE + 2 from last turn
+        CHECK(match.currentClue().number == 2 && match.currentClue().bonusTries == 2);
+        CHECK(match.pendingExtraTries(team) == 0);                               // and it is used up
+        CHECK(match.clueHistory().size() == 3);
+        for (int k = 1; k <= 3; k++) {                                           // three good tries: still the team's turn
+            CHECK(match.guess(guesserOf(team), mine[k]) == keyOf(team));
+            CHECK(match.currentTeam() == team && match.triesRemaining() == 4 - k);
+        }
+        CHECK(match.guess(guesserOf(team), mine[4]) == keyOf(team));             // the fourth and last try
+        CHECK(match.currentTeam() == other && !match.hasClue());                 // no tries left: the turn passes by itself
+        CHECK(match.pendingExtraTries(team) == 0);                               // all good: nothing carried over
+        CHECK(match.clueHistory()[2].found == 4);
+        CHECK(match.remaining(team) == 8 - 5);                                   // 1 + 4 cards found
+
+        // the other team's card also ends the turn and also carries the unused tries over
+        match.giveClue(spyOf(other), "CLUE", 2);
+        match.endTurn(guesserOf(other));
+        match.giveClue(spyOf(team), "STORM", 3);
+        CHECK(match.guess(guesserOf(team), theirs[0]) == keyOf(other));          // first try wrong: nothing found
+        CHECK(match.currentTeam() == other && match.pendingExtraTries(team) == 3);
+    }
+
+    // ---- the carry-over is the clue number minus the good tries, and never negative
+    {
+        Match match(fullLobby(), characters());
+        Team team = match.currentTeam(), other = otherThan(team);
+        vector<int> mine = cardsWith(match, spyOf(team), keyOf(team));
+        vector<int> beige = cardsWith(match, spyOf(team), CardKey::BEIGE);
+        match.giveClue(spyOf(team), "A", 1);
+        match.guess(guesserOf(team), beige[0]);
+        CHECK(match.pendingExtraTries(team) == 1);                               // a clue of 1, none found
+        match.giveClue(spyOf(other), "B", 1); match.endTurn(guesserOf(other));
+
+        match.giveClue(spyOf(team), "C", 2);                                     // 2 + 1 = 3 tries
+        CHECK(match.triesRemaining() == 3);
+        match.guess(guesserOf(team), mine[0]);
+        match.guess(guesserOf(team), mine[1]);                                   // the 2 cards of the clue
+        match.guess(guesserOf(team), beige[1]);                                  // and a wrong third try
+        CHECK(match.pendingExtraTries(team) == 0);                               // 2 - 2 = 0: more good tries than the clue number
+        match.giveClue(spyOf(other), "D", 1); match.endTurn(guesserOf(other));
+
+        // ending the turn on purpose gives nothing, even with tries left
+        match.giveClue(spyOf(team), "E", 3);
+        match.guess(guesserOf(team), mine[2]);
+        match.endTurn(guesserOf(team));
+        CHECK(match.currentTeam() == other && match.pendingExtraTries(team) == 0);
+        match.giveClue(spyOf(other), "F", 1); match.endTurn(guesserOf(other));
+        match.endTurn(guesserOf(team));                                          // ending before any clue is allowed too
+        CHECK(match.currentTeam() == other && match.pendingExtraTries(team) == 0);
+    }
+
+    // ---- the number cannot be higher than the cards the team has left
+    {
+        Match match(fullLobby(), characters());
+        Team team = match.currentTeam(), other = otherThan(team);
+        vector<int> mine = cardsWith(match, spyOf(team), keyOf(team));
+        match.giveClue(spyOf(team), "ALL", 8);
+        for (int i = 0; i < 7; i++) match.guess(guesserOf(team), mine[i]);       // 7 found, 8 tries: one left
+        CHECK(match.triesRemaining() == 1 && match.remaining(team) == 1);
+        match.endTurn(guesserOf(team));
+        match.giveClue(spyOf(other), "X", 1); match.endTurn(guesserOf(other));
+        CHECK(rejects([&] { match.giveClue(spyOf(team), "MORE", 2); }));         // only 1 card left
+        match.giveClue(spyOf(team), "LAST", 1);
+        match.guess(guesserOf(team), mine[7]);
+        CHECK(match.isFinished() && match.winner() == team);
+    }
+
+    // ---- time: running out of time gives no extra tries and wipes the clue
+    {
+        Lobby timed = fullLobby();
+        timed.chooseTimer(true, 30);
+        for (string name : {"bs", "bg", "rs", "rg"}) timed.setReady(name, true);
+        Clock::time_point start = Clock::now();
+        Match match(timed, characters(), start);
+        Team team = match.currentTeam(), other = otherThan(team);
+        vector<int> mine = cardsWith(match, spyOf(team), keyOf(team));
+        match.giveClue(spyOf(team), "SLOW", 4, at(start, 5));
+        match.guess(guesserOf(team), mine[0], at(start, 10));
+        match.advanceClock(at(start, 30));                                       // the 30 s are up
+        CHECK(match.currentTeam() == other && !match.hasClue() && match.triesRemaining() == 0);
+        CHECK(match.pendingExtraTries(team) == 0);
+        CHECK(match.clueHistory().size() == 1 && match.clueHistory()[0].found == 1);
+        CHECK(rejects([&] { match.giveClue(spyOf(team), "LATE", 1, at(start, 31)); }));   // it is not their turn any more
+        match.giveClue(spyOf(other), "FAST", 2, at(start, 31));
+        // a whole number of periods later it is the same team again, but it is a new turn: a new clue is needed
+        match.advanceClock(at(start, 30 + 60));
+        CHECK(match.currentTeam() == other && !match.hasClue());
+    }
+
+    // ---- the black card ends the match whatever the tries
+    {
+        Match match(fullLobby(), characters());
+        Team team = match.currentTeam();
+        match.giveClue(spyOf(team), "RISK", 5);
+        match.guess(guesserOf(team), cardsWith(match, spyOf(team), CardKey::BLACK)[0]);
+        CHECK(match.isFinished() && match.winner() == otherThan(team));
+        CHECK(rejects([&] { match.giveClue(spyOf(otherThan(team)), "AFTER", 1); }));
+    }
+    { // a clue cannot be given to a match that ended by forfeit
+        Match match(fullLobby(), characters());
+        match.forfeit("bg");
+        CHECK(rejects([&] { match.giveClue(spyOf(match.currentTeam()), "LATE", 1); }));
     }
 }
 
@@ -352,6 +539,8 @@ void testMatchPermissions() {
     Team team = match.currentTeam(), other = otherThan(team);
     CHECK(rejects([&] { match.guess(spyOf(team), 0); }));
     CHECK(rejects([&] { match.guess(guesserOf(other), 0); }));
+    CHECK(rejects([&] { match.guess(guesserOf(team), 0); }));                  // no clue yet
+    clueFor(match, 3);
     CHECK(rejects([&] { match.guess(guesserOf(team), -1); }));
     CHECK(rejects([&] { match.guess(guesserOf(team), 25); }));
     CHECK(rejects([&] { match.guess("nobody", 0); }));
@@ -372,6 +561,7 @@ void testMatchOutcomes() {
         vector<CardView> spy = match.viewFor(spyOf(team));
         int black = -1;
         for (int i = 0; i < 25; i++) if (spy[i].key == CardKey::BLACK) black = i;
+        clueFor(match, 1);
         CHECK(match.guess(guesserOf(team), black) == CardKey::BLACK);
         CHECK(match.isFinished() && match.winner() == otherThan(team));
         CHECK(rejects([&] { match.guess(guesserOf(team), 0); }));
@@ -381,6 +571,7 @@ void testMatchOutcomes() {
         Match match(fullLobby(), characters());
         Team team = match.currentTeam();
         vector<CardView> spy = match.viewFor(spyOf(team));
+        clueFor(match);                                                          // 8 cards, 8 tries
         int found = 0;
         for (int i = 0; i < 25; i++) {
             if (spy[i].key != keyOf(team)) continue;
@@ -405,8 +596,10 @@ void testMatchOutcomes() {
             if (spy[i].key == keyOf(other)) theirs = i;
             if (spy[i].key == keyOf(team)) mine = i;
         }
+        clueFor(match, 2);
         match.guess(guesserOf(team), beige);
         CHECK(match.currentTeam() == other && !match.isFinished());
+        clueFor(match, 3);
         match.guess(guesserOf(other), theirs);                                   // their own card: they keep the turn
         CHECK(match.currentTeam() == other && match.remaining(other) == 7);
         match.guess(guesserOf(other), mine);                                     // the opponent's card: the turn passes
@@ -420,8 +613,12 @@ void testMatchOutcomes() {
         for (int i = 0; i < 25; i++) if (spy[i].key == keyOf(other)) theirs.push_back(i);
         for (int i = 0; i < 8; i++) {
             Team turn = match.currentTeam();
+            if (!match.hasClue()) clueFor(match, 1);
             match.guess(guesserOf(turn), theirs[i]);                             // whoever guesses, these are `other`'s cards
-            if (!match.isFinished() && match.currentTeam() == team) match.endTurn(guesserOf(team));
+            if (!match.isFinished() && match.currentTeam() == team) {
+                if (!match.hasClue()) clueFor(match, 1);
+                match.endTurn(guesserOf(team));
+            }
         }
         CHECK(match.isFinished() && match.winner() == other);
     }
@@ -438,6 +635,7 @@ void testMatchOutcomes() {
                 vector<CardView> view = match.viewFor(guesserOf(team));
                 vector<int> hidden;
                 for (int i = 0; i < 25; i++) if (view[i].state == CardState::SECRET) hidden.push_back(i);
+                if (!match.hasClue()) clueFor(match, 1 + (int)(rng()() % match.remaining(team)));
                 if (rng()() % 5 == 0) { match.endTurn(guesserOf(team)); continue; }
                 if (match.guess(guesserOf(team), hidden[rng()() % hidden.size()]) == CardKey::BLACK) { black = true; blackBy = team; }
             }
@@ -481,6 +679,7 @@ void testForfeit() {
         Match match(fullLobby(), characters());
         Team team = match.currentTeam();
         vector<CardView> spy = match.viewFor(spyOf(team));
+        clueFor(match, 1);
         for (int i = 0; i < 25; i++) if (spy[i].key == CardKey::BLACK) match.guess(guesserOf(team), i);
         CHECK(match.isFinished() && !match.wasForfeited());
     }
@@ -492,6 +691,7 @@ int main() {
     testWaitingRoom();
     testUniverses();
     testTimer();
+    testClues();
     testGrid();
     testMatchSetupAndViews();
     testMatchPermissions();

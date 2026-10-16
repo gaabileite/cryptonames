@@ -447,7 +447,7 @@
         button.querySelector('.name').textContent = card.name;
 
         button.className = `card key-${card.key}${card.state === 'REVEALED' ? ' revealed' : ''}${isSpy ? ' spy-view' : ''}`;
-        button.disabled = !(state.yourTurn && card.state === 'SECRET');
+        button.disabled = !(state.canGuess && card.state === 'SECRET');
         button.setAttribute('aria-label', describeCard(card, isSpy));
 
         // The colour as text too, so it does not depend on seeing the colours.
@@ -527,9 +527,99 @@
     }
     setInterval(paintTimer, 250);
 
+    // ---------- Clues ----------
+
+    function plural(count, word) {
+        if (count === 1) return `1 ${word}`;
+        return word.endsWith('y') ? `${count} ${word.slice(0, -1)}ies` : `${count} ${word}s`;      // try -> tries
+    }
+
+    function span(className, text) {
+        const element = document.createElement('span');
+        element.className = className;
+        element.textContent = text;           // textContent: a clue can never inject HTML
+        return element;
+    }
+
+    function renderClues(state) {
+        const bar = $('clue-bar'), form = $('clue-form');
+        bar.replaceChildren();
+        bar.className = 'clue-bar';
+
+        // The clue of the turn, for everybody to see
+        if (!state.finished && state.clue) {
+            const clue = state.clue;
+            bar.className = `clue-bar team-${clue.team}`;
+            bar.append('Clue: ', span('word', clue.text), span('num', String(clue.number)));
+            bar.append(span('tries', `${plural(clue.triesLeft, 'try')} left · found ${clue.found} of ${clue.number}`));
+            if (clue.bonusTries > 0) bar.append(span('sub', `includes ${plural(clue.bonusTries, 'extra try')} from the last turn`));
+        } else if (!state.finished && !state.canGiveClue) {
+            bar.className = `clue-bar team-${state.currentTeam}`;
+            bar.append(state.you.team === state.currentTeam && state.you.role === 'GUESSER'
+                ? "Waiting for your spy's clue..."
+                : `Team ${NAMES[state.currentTeam]}'s spy is thinking of a clue...`);
+        }
+
+        // The form of the spy whose turn it is to give the clue
+        const wasHidden = form.hidden;
+        form.hidden = !state.canGiveClue;
+        if (state.canGiveClue) {
+            const select = $('clue-number');
+            const cardsLeft = state.remaining[state.you.team];
+            if (select.options.length !== cardsLeft) {          // keep what was chosen while the options are the same
+                const chosen = Number(select.value) || 1;
+                select.replaceChildren();
+                for (let n = 1; n <= cardsLeft; n++) select.append(new Option(String(n), String(n)));
+                select.value = String(Math.min(chosen, cardsLeft));
+            }
+            const extra = state.extraTries[state.you.team];
+            $('clue-extra').hidden = extra === 0;
+            $('clue-extra').textContent = `Your guesser also gets ${plural(extra, 'extra try')} from the last turn, on top of the number you pick.`;
+            if (wasHidden) $('clue-text').focus();
+        } else {
+            $('clue-error').hidden = true;
+        }
+
+        // Every clue so far, newest first
+        const list = $('clue-list');
+        list.replaceChildren();
+        for (const clue of state.clues.slice().reverse().slice(0, 12)) {
+            const item = document.createElement('li');
+            item.append(chip(clue.team), span('word', clue.text), `${clue.number}`,
+                span('result', `found ${clue.found} of ${clue.number}${clue.bonusTries > 0 ? ` · +${clue.bonusTries} extra tries` : ''}`));
+            list.append(item);
+        }
+    }
+
+    function showClueError(message) {
+        $('clue-error').textContent = message || '';
+        $('clue-error').hidden = !message;
+    }
+
+    $('clue-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (busy) return;
+        const words = $('clue-text').value.trim().split(/\s+/).filter(Boolean);
+        if (words.length === 0) return showClueError('Type a clue.');
+        if (words.length > 2) return showClueError('A clue can have at most 2 words.');
+        showClueError('');
+        busy = true;
+        $('clue-btn').disabled = true;
+        try {
+            await api('POST', '/api/clue', { text: words.join(' '), number: Number($('clue-number').value) });
+            $('clue-text').value = '';
+        } catch (error) {
+            showClueError(error.message);
+        } finally {
+            busy = false;
+            $('clue-btn').disabled = false;
+            refreshPlay().catch(() => {});
+        }
+    });
+
     function renderGame(state, board) {
         show('game');
-        document.title = state.yourTurn ? `Your turn - ${BASE_TITLE}` : BASE_TITLE;
+        document.title = state.canGuess || state.canGiveClue ? `Your turn - ${BASE_TITLE}` : BASE_TITLE;
         updateTimer(state.timer, state.finished);
         const { timer, ...stable } = state;       // the time left changes with every poll, which must not redraw the board
         if (!changed('game', { state: stable, board })) return;
@@ -559,14 +649,22 @@
             hint = state.forfeitedBy === you.team ? 'Your team forfeited.' : 'The other team forfeited.';
         } else if (state.finished) {
             hint = state.winner === you.team ? 'Your team won.' : 'Your team lost.';
+        } else if (state.canGiveClue) {
+            hint = 'Your turn: give your guesser a clue. You see every colour.';
+        } else if (isSpy && state.currentTeam === you.team) {
+            hint = 'Your clue is out. Your guesser is picking cards.';
         } else if (isSpy) {
-            hint = 'You are the spy: you see every colour. Give your guesser clues outside the app.';
+            hint = `Waiting for team ${NAMES[state.currentTeam]} to play. You see every colour.`;
+        } else if (state.canGuess) {
+            hint = `Your turn: pick a card (${state.clue.triesLeft} ${state.clue.triesLeft === 1 ? 'try' : 'tries'} left), or end your turn.`;
         } else if (state.yourTurn) {
-            hint = 'Your turn: pick a card, or end your turn.';
+            hint = "Waiting for your spy's clue. You can also end the turn.";
         } else {
             hint = `Waiting for team ${NAMES[state.currentTeam]} to play.`;
         }
         $('hint').textContent = hint;
+
+        renderClues(state);
 
         // Board: a card that was secret and is now revealed is turned over (for every player), the others are just redrawn.
         const turnedOver = lastStates

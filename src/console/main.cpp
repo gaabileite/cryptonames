@@ -74,6 +74,40 @@ void playFromConsole(Match& match) {
 
         cout << "\nTurn of team " << toString(team) << " - guesser: " << guesser << endl;
         cout << "Cards left: BLUE " << match.remaining(Team::BLUE) << ", RED " << match.remaining(Team::RED) << endl;
+
+        // The turn starts with the spy's clue: 1-2 words and how many cards fit
+        if (!match.hasClue()) {
+            string spy = nameOf(match, team, Role::SPY);
+            cout << "Spy " << spy << ", this is your board:" << endl;
+            printBoard(match.viewFor(spy));
+            if (match.pendingExtraTries(team) > 0) {
+                cout << "(Your guesser gets " << match.pendingExtraTries(team) << " extra tries from the last turn.)" << endl;
+            }
+            cout << "Clue (1 or 2 words): ";
+            string text, numberInput;
+            if (!getline(cin, text)) {
+                throw runtime_error("Input closed before the match ended");
+            }
+            cout << "Number of cards (1-" << match.remaining(team) << "): ";
+            if (!getline(cin, numberInput)) {
+                throw runtime_error("Input closed before the match ended");
+            }
+            try {
+                int number = -1;
+                try {
+                    number = stoi(numberInput);
+                } catch (const exception&) {
+                    // stays out of range, and giveClue says so
+                }
+                match.giveClue(spy, text, number);
+            } catch (const invalid_argument& e) {
+                cout << "Could not give that clue: " << e.what() << endl;
+            }
+            continue;
+        }
+
+        const Clue& clue = match.currentClue();
+        cout << "Clue: " << clue.text << " " << clue.number << " - tries left: " << match.triesRemaining() << endl;
         printBoard(match.viewFor(guesser));
 
         cout << "Card number (1-25), 0 to end the turn, s to see the spy's board, f to forfeit: ";

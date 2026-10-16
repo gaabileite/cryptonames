@@ -199,6 +199,40 @@ input[type="text"] {
 .presets button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* The countdown of the turn, during the match */
+/* Clues */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.clue-bar {
+    margin: 12px auto 0;
+    padding: 10px 16px;
+    text-align: center;
+    font-size: 1.1rem;
+    background: var(--surface);
+    border: 2px solid var(--border);
+    border-radius: 10px;
+}
+.clue-bar.team-BLUE { border-color: var(--blue); }
+.clue-bar.team-RED { border-color: var(--red); }
+.clue-bar .word { font-size: 1.6rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+.clue-bar .num { display: inline-block; min-width: 1.9em; margin: 0 8px; padding: 0 8px; font-size: 1.5rem; font-weight: 800; color: var(--on-accent); background: var(--accent); border-radius: 999px; }
+.clue-bar .tries { display: block; margin-top: 4px; font-weight: 600; }
+.clue-bar .sub { display: block; font-size: 0.9rem; font-weight: 400; color: var(--muted); }
+.clue-bar:empty { display: none; }
+
+.clue-form { max-width: 720px; margin: 12px auto 0; padding: 14px; background: var(--surface); border: 2px solid var(--text); border-radius: 10px; }
+.clue-form > label { margin-bottom: 6px; }
+.clue-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.clue-row input { flex: 1 1 12rem; width: auto; text-transform: uppercase; }
+.clue-row select { padding: 10px 12px; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
+
+.clue-log { max-width: 720px; margin: 20px auto 0; color: var(--muted); }
+.clue-log summary { cursor: pointer; font-weight: 600; }
+.clue-list { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.clue-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 10px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.clue-list .word { font-weight: 800; text-transform: uppercase; }
+.clue-list .result { color: var(--muted); font-size: 0.9rem; }
+.clue-list:empty::after { content: "No clues yet."; color: var(--muted); }
+
 .turn-timer {
     width: fit-content;
     margin: 10px auto 0;
