@@ -249,17 +249,70 @@
         $('universe-count').textContent = `${lobby.charactersSelected} characters selected. A game needs at least ${lobby.charactersNeeded}.`;
     }
 
-    // Turn timer setup: a checkbox, the seconds, and a few quick choices.
-    const PRESETS = [[30, '30 s'], [60, '1 min'], [120, '2 min'], [300, '5 min']];
-    const presetButtons = [];
-    (function buildPresets() {
-        for (const [seconds, label] of PRESETS) {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.textContent = label;
-            button.dataset.seconds = seconds;
-            $('timer-presets').append(button);
-            presetButtons.push(button);
+    // Time limits: one for the spy to give the clue and one for the guesser, each with a checkbox, the seconds and quick choices.
+    const TIMER_ROWS = [
+        { key: 'clue', checkbox: 'Limit the time to give the clue', label: 'Seconds for the clue', presets: [[30, '30 s'], [60, '1 min'], [120, '2 min']] },
+        { key: 'guess', checkbox: 'Limit the time to guess', label: 'Seconds for guessing', presets: [[30, '30 s'], [60, '1 min'], [120, '2 min'], [300, '5 min']] },
+    ];
+    const timerRows = {};         // 'clue' -> { on, seconds, presets: [buttons] }
+    (function buildTimerRows() {
+        for (const row of TIMER_ROWS) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'timer-row';
+
+            const check = document.createElement('label');
+            check.className = 'check-row';
+            const on = document.createElement('input');
+            on.type = 'checkbox';
+            on.id = `timer-${row.key}-on`;
+            check.append(on, ` ${row.checkbox}`);
+
+            const line = document.createElement('div');
+            line.className = 'timer-seconds';
+            const label = document.createElement('label');
+            label.htmlFor = `timer-${row.key}-seconds`;
+            label.textContent = row.label;
+            const seconds = document.createElement('input');
+            seconds.type = 'number';
+            seconds.id = `timer-${row.key}-seconds`;
+            seconds.inputMode = 'numeric';
+            seconds.step = '5';
+            const presetBox = document.createElement('span');
+            presetBox.className = 'presets';
+            presetBox.id = `timer-${row.key}-presets`;
+            const presets = [];
+            for (const [value, text] of row.presets) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.textContent = text;
+                button.dataset.seconds = value;
+                presetBox.append(button);
+                presets.push(button);
+            }
+            line.append(label, seconds, presetBox);
+            wrapper.append(check, line);
+            $('timer-rows').append(wrapper);
+            timerRows[row.key] = { on, seconds, presets };
+
+            on.addEventListener('change', () => {
+                waitAction(() => api('POST', '/api/timer', { phase: row.key, enabled: on.checked })).catch(() => {});
+            });
+            seconds.addEventListener('change', () => {
+                const value = Number(seconds.value);
+                if (seconds.value.trim() === '' || !Number.isInteger(value) || value < Number(seconds.min) || value > Number(seconds.max)) {
+                    showError('wait-error', `The time can be from ${seconds.min} to ${seconds.max} seconds.`);
+                    delete lastRendered.wait;          // put the value of the server back
+                    seconds.blur();
+                    refreshPlay().catch(() => {});
+                    return;
+                }
+                waitAction(() => api('POST', '/api/timer', { phase: row.key, enabled: on.checked, seconds: value })).catch(() => {});
+            });
+            presetBox.addEventListener('click', (event) => {
+                const button = event.target.closest('button');
+                if (!button || button.disabled) return;
+                waitAction(() => api('POST', '/api/timer', { phase: row.key, enabled: true, seconds: Number(button.dataset.seconds) })).catch(() => {});
+            });
         }
     })();
 
@@ -269,44 +322,30 @@
     }
 
     function renderTimerSetup(lobby) {
-        const timer = lobby.timer;
-        $('timer-on').checked = timer.enabled;
-        const seconds = $('timer-seconds');
-        seconds.min = timer.min;
-        seconds.max = timer.max;
-        seconds.disabled = !timer.enabled;
-        if (document.activeElement !== seconds) seconds.value = timer.seconds;    // never overwrite what somebody is typing
-        for (const button of presetButtons) {
-            button.disabled = !timer.enabled;
-            button.classList.toggle('on', timer.enabled && Number(button.dataset.seconds) === timer.seconds);
+        const timers = lobby.timers;
+        for (const row of TIMER_ROWS) {
+            const limit = timers[row.key];
+            const { on, seconds, presets } = timerRows[row.key];
+            on.checked = limit.enabled;
+            seconds.min = timers.min;
+            seconds.max = timers.max;
+            seconds.disabled = !limit.enabled;
+            if (document.activeElement !== seconds) seconds.value = limit.seconds;    // never overwrite what somebody is typing
+            for (const button of presets) {
+                button.disabled = !limit.enabled;
+                button.classList.toggle('on', limit.enabled && Number(button.dataset.seconds) === limit.seconds);
+            }
         }
-        $('timer-note').textContent = timer.enabled
-            ? `Each turn lasts at most ${formatSeconds(timer.seconds)} (from ${timer.min} to ${timer.max} seconds). When the time runs out, the turn passes to the other team. Changing this cancels everybody's ready.`
-            : "No time limit: a turn lasts as long as the team needs. Anybody can turn the timer on, and doing so cancels everybody's ready.";
+        const clue = timers.clue, guess = timers.guess;
+        if (!clue.enabled && !guess.enabled) {
+            $('timer-note').textContent = "No time limits: the spy and the guesser can take as long as they need. Anybody can turn a limit on, and doing so cancels everybody's ready.";
+        } else {
+            $('timer-note').textContent =
+                (clue.enabled ? `The spy has at most ${formatSeconds(clue.seconds)} to give the clue. ` : 'The clue has no time limit. ') +
+                (guess.enabled ? `The guesser has at most ${formatSeconds(guess.seconds)}, counted from the moment the clue is sent. ` : 'Guessing has no time limit. ') +
+                `When time runs out, the turn passes to the other team (from ${timers.min} to ${timers.max} seconds can be chosen). Changing a limit cancels everybody's ready.`;
+        }
     }
-
-    $('timer-on').addEventListener('change', () => {
-        waitAction(() => api('POST', '/api/timer', { enabled: $('timer-on').checked })).catch(() => {});
-    });
-
-    $('timer-seconds').addEventListener('change', () => {
-        const input = $('timer-seconds');
-        const seconds = Number(input.value);
-        if (input.value.trim() === '' || !Number.isInteger(seconds) || seconds < Number(input.min) || seconds > Number(input.max)) {
-            showError('wait-error', `A turn can last from ${input.min} to ${input.max} seconds.`);
-            delete lastRendered.wait;          // put the value of the server back
-            input.blur();
-            refreshPlay().catch(() => {});
-            return;
-        }
-        waitAction(() => api('POST', '/api/timer', { enabled: $('timer-on').checked, seconds })).catch(() => {});
-    });
-
-    $('timer-presets').addEventListener('click', (event) => {
-        const button = event.target.closest('button');
-        if (!button || button.disabled) return;
-        waitAction(() => api('POST', '/api/timer', { enabled: true, seconds: Number(button.dataset.seconds) })).catch(() => {});
-    });
 
     let me = null;        // who I am in the waiting room, from the last state
 
@@ -360,22 +399,24 @@
         readyButton.setAttribute('aria-pressed', you.ready ? 'true' : 'false');
     }
 
-    // One action at a time in the waiting room as well, so quick double clicks do not collide.
-    let waitBusy = false;
-    async function waitAction(request) {
-        if (waitBusy) return;
-        waitBusy = true;
-        showError('wait-error', '');
-        try {
-            await request();
-        } catch (error) {
-            if (error.status === 401) throw error;
-            showError('wait-error', error.message);
-        } finally {
-            waitBusy = false;
-            delete lastRendered.wait;        // redraw from the server's data, which also puts back anything that was rejected
-            refreshPlay().catch(() => {});
-        }
+    // The changes of the waiting room (seat, ready, universes, time limits) go to the server one after the other, in the
+    // order they were made, so none of them is lost when two are made quickly (for example, two time limits in a row).
+    let waitQueue = Promise.resolve();
+    function waitAction(request) {
+        const run = waitQueue.then(async () => {
+            showError('wait-error', '');
+            try {
+                await request();
+            } catch (error) {
+                if (error.status === 401) throw error;
+                showError('wait-error', error.message);
+            } finally {
+                delete lastRendered.wait;        // redraw from the server's data, which also puts back anything that was rejected
+                refreshPlay().catch(() => {});
+            }
+        });
+        waitQueue = run.catch(() => {});         // a failed change does not stop the ones after it
+        return run;
     }
 
     $('teams').addEventListener('click', (event) => {
@@ -499,7 +540,8 @@
 
     // The countdown of the turn. The server says how many milliseconds are left, and this counts down from there;
     // the time that matters is always the server's, so this is only what the player sees.
-    let turnDeadline = null;          // performance.now() value at which the turn ends
+    let turnDeadline = null;          // performance.now() value at which the time of the phase ends
+    let timerLabel = '';              // which phase it counts: the clue or the guessing
     let timeUpRefreshFor = null;      // the deadline for which the refresh at 0 was already asked
     function updateTimer(timer, finished) {
         const element = $('turn-timer');
@@ -509,6 +551,7 @@
             return;
         }
         turnDeadline = performance.now() + timer.millisecondsLeft;
+        timerLabel = timer.phase === 'CLUE' ? 'Clue' : 'Guessing';
         element.hidden = false;
         paintTimer();
     }
@@ -518,7 +561,7 @@
         const element = $('turn-timer');
         const left = Math.max(0, turnDeadline - performance.now());
         const seconds = Math.ceil(left / 1000);
-        element.textContent = left === 0 ? "Time's up!" : `⏱ ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+        element.textContent = left === 0 ? "Time's up!" : `${timerLabel} ⏱ ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
         element.classList.toggle('low', seconds <= 10);
         if (left === 0 && timeUpRefreshFor !== turnDeadline) {
             timeUpRefreshFor = turnDeadline;            // the server passes the turn by itself: just go and look

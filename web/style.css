@@ -172,6 +172,7 @@ input[type="text"] {
 .universe-list .uni input:disabled + .pill { opacity: 0.55; }
 .timer-setup { max-width: 720px; margin: 20px 0 0; padding: 0; border: 0; }
 .timer-setup legend { padding: 0; margin-bottom: 8px; font-weight: 700; }
+.timer-row + .timer-row { margin-top: 14px; }
 .check-row { display: flex; align-items: center; gap: 10px; margin: 0; font-weight: 400; cursor: pointer; }
 .check-row input { width: 1.2rem; height: 1.2rem; margin: 0; }
 .timer-seconds { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 10px; }

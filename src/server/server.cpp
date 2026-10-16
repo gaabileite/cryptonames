@@ -8,10 +8,11 @@
 //
 // Waiting room (until every seat is taken and everybody is ready, then the match starts by itself):
 //   GET  /api/lobby      who is in the waiting room (team and role are null until picked, plus "ready"), the open seats,
-//                        the universes with their character count and whether they are selected, and the turn timer setting
+//                        the universes with their character count and whether they are selected, and the time limits
 //   POST /api/join       {"name"} -> {"token", ...}
 //   POST /api/seat       {"team", "role"} picks or changes your seat; not while ready      (X-Token)
-//   POST /api/timer      {"enabled": true|false, "seconds": 15-600} turn time limit; cancels everybody's ready  (X-Token)
+//   POST /api/timer      {"phase": "clue"|"guess", "enabled": true|false, "seconds": 15-600} the time limit of the clue or
+//                        of the guessing; cancels everybody's ready                       (X-Token)
 //   POST /api/ready      {"ready": true|false}                                             (X-Token)
 //   POST /api/universes  {"universe": "MCU", "selected": true|false} switches one universe on or off; cancels everybody's ready (X-Token)
 //   POST /api/leave      leaves the room (see below)                                       (X-Token)
@@ -146,10 +147,13 @@ json clueJson(const Clue& clue) {
             {"bonusTries", clue.bonusTries}, {"found", clue.found}};
 }
 
-json timerJson() {
-    const TurnTimer& timer = game.lobby.timer();
-    return {{"enabled", timer.enabled}, {"seconds", timer.seconds},
-            {"min", Lobby::minTurnSeconds}, {"max", Lobby::maxTurnSeconds}};
+json timersJson() {
+    json answer = {{"min", Lobby::minTurnSeconds}, {"max", Lobby::maxTurnSeconds}};
+    for (TimerPhase phase : {TimerPhase::CLUE, TimerPhase::GUESS}) {
+        const TimeLimit& limit = game.lobby.timer(phase);
+        answer[phase == TimerPhase::CLUE ? "clue" : "guess"] = {{"enabled", limit.enabled}, {"seconds", limit.seconds}};
+    }
+    return answer;
 }
 
 json universesJson() {
@@ -244,7 +248,7 @@ int main(int argc, char* argv[]) {
                     {"totalSeats", game.lobby.totalSeats()},
                     {"players", players}, {"openSlots", slots},
                     {"universes", universesJson()}, {"charactersSelected", charactersIn(game.lobby.universes())},
-                    {"charactersNeeded", cardsOnBoard}, {"timer", timerJson()}};
+                    {"charactersNeeded", cardsOnBoard}, {"timers", timersJson()}};
     }));
 
     server.Post("/api/join", endpoint([](const httplib::Request& req) {
@@ -314,20 +318,25 @@ int main(int argc, char* argv[]) {
         json body = bodyOf(req);
         requireWaitingRoom();
         memberOf(req);                                   // only somebody in the waiting room can change it
+        string phaseName = textField(body, "phase");
+        if (phaseName != "clue" && phaseName != "guess") {
+            throw HttpError(400, "The phase must be clue or guess");
+        }
+        TimerPhase phase = phaseName == "clue" ? TimerPhase::CLUE : TimerPhase::GUESS;
         bool enabled = booleanField(body, "enabled");
-        int seconds = game.lobby.timer().seconds;        // not sent: keep the seconds that were chosen
+        int seconds = game.lobby.timer(phase).seconds;   // not sent: keep the seconds that were chosen
         if (body.contains("seconds")) {
             if (!body["seconds"].is_number_integer()) {
                 throw HttpError(400, "The seconds must be a whole number");
             }
             long long wanted = body["seconds"].get<long long>();      // not an int: a huge number must not wrap around into a valid one
             if (wanted < Lobby::minTurnSeconds || wanted > Lobby::maxTurnSeconds) {
-                throw HttpError(400, "A turn can last from " + to_string(Lobby::minTurnSeconds) + " to " + to_string(Lobby::maxTurnSeconds) + " seconds");
+                throw HttpError(400, "The time can be from " + to_string(Lobby::minTurnSeconds) + " to " + to_string(Lobby::maxTurnSeconds) + " seconds");
             }
             seconds = (int)wanted;
         }
-        game.lobby.chooseTimer(enabled, seconds);        // cancels everybody's ready if the setting changed
-        return json{{"timer", timerJson()}};
+        game.lobby.chooseTimer(phase, enabled, seconds); // cancels everybody's ready if the setting changed
+        return json{{"timers", timersJson()}};
     }));
 
     server.Post("/api/ready", endpoint([](const httplib::Request& req) {
@@ -348,8 +357,11 @@ int main(int argc, char* argv[]) {
         if (game.match) {
             Match& match = startedMatch();                // brings the clock up to date first
             answer["finished"] = match.isFinished();
-            answer["timer"] = {{"enabled", match.hasTimeLimit()}, {"seconds", match.turnLimitSeconds()},
-                               {"millisecondsLeft", match.hasTimeLimit() && !match.isFinished() ? json(match.millisecondsLeft()) : json(nullptr)}};
+            // The countdown of the phase the turn is in: giving the clue, or guessing after it.
+            answer["timer"] = {{"phase", match.hasClue() ? "GUESS" : "CLUE"}, {"enabled", match.hasTimeLimit()},
+                               {"seconds", match.phaseLimitSeconds()},
+                               {"millisecondsLeft", match.hasTimeLimit() && !match.isFinished() ? json(match.millisecondsLeft()) : json(nullptr)},
+                               {"clueSeconds", match.clueLimitSeconds()}, {"guessSeconds", match.guessLimitSeconds()}};
             answer["currentTeam"] = toString(match.currentTeam());
             answer["remaining"] = {{"BLUE", match.remaining(Team::BLUE)}, {"RED", match.remaining(Team::RED)}};
             bool onTurn = !match.isFinished() && you.seat->first == match.currentTeam();

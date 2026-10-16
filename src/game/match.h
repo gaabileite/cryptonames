@@ -33,9 +33,10 @@ struct CardView {
 // team. Ending the turn on purpose, or running out of time, gives no extra tries.
 // The BLACK card loses the game on the spot.
 // The first team to reveal all of its cards wins.
-// With a time limit (chosen in the waiting room) each turn can last that many seconds, counted from the moment the turn
-// begins; guessing right does not give more time. When it runs out the turn passes to the other team. Nothing runs by
-// itself: whoever drives the match calls advanceClock(), and guess() and endTurn() do it first.
+// There can be two time limits (chosen in the waiting room): one for the SPY to give the clue, counted from the moment
+// the turn begins, and one for the GUESSER, counted from the moment the clue is given; guessing right does not give more
+// time. When the time of a phase runs out the turn passes to the other team. Nothing runs by itself: whoever drives the
+// match calls advanceClock(), and giveClue(), guess() and endTurn() do it first.
 class Match {
     public:
         typedef chrono::steady_clock Clock;
@@ -46,8 +47,9 @@ class Match {
         Team turn;
         MatchState matchState;
         Team winningTeam;
-        int turnSeconds;                  // 0: no time limit
-        Clock::time_point turnStartedAt;
+        int clueSeconds;                  // 0: no time limit for the clue
+        int guessSeconds;                 // 0: no time limit for the guessing
+        Clock::time_point phaseStartedAt; // when the turn began, or when the clue was given
         bool forfeited;
         Team forfeitingTeam;
         vector<Clue> clues;               // every clue of the match, oldest first
@@ -97,7 +99,7 @@ class Match {
 
         // A new turn begins: nobody has given the clue yet.
         void startTurn(Clock::time_point now) {
-            turnStartedAt = now;
+            phaseStartedAt = now;
             clueGiven = false;
             triesLeft = 0;
             goodTries = 0;
@@ -130,7 +132,8 @@ class Match {
             turn = coin(rng()) == 0 ? Team::BLUE : Team::RED;
             matchState = MatchState::IN_PROGRESS;
             winningTeam = turn;
-            turnSeconds = lobby.timer().enabled ? lobby.timer().seconds : 0;
+            clueSeconds = lobby.timer(TimerPhase::CLUE).enabled ? lobby.timer(TimerPhase::CLUE).seconds : 0;
+            guessSeconds = lobby.timer(TimerPhase::GUESS).enabled ? lobby.timer(TimerPhase::GUESS).seconds : 0;
             carryOver[0] = carryOver[1] = 0;
             startTurn(now);
             forfeited = false;
@@ -169,37 +172,42 @@ class Match {
             return forfeitingTeam;
         }
 
+        // Seconds of the limit of the phase the turn is in: giving the clue, or guessing after it. 0 means no limit.
+        int phaseLimitSeconds() const {
+            return clueGiven ? guessSeconds : clueSeconds;
+        }
+
+        // Does the phase the turn is in have a time limit?
         bool hasTimeLimit() const {
-            return turnSeconds > 0;
+            return phaseLimitSeconds() > 0;
         }
 
-        // How many seconds a turn can last. 0 without a time limit.
-        int turnLimitSeconds() const {
-            return turnSeconds;
+        // The limits chosen for the match, whatever the phase is. 0 means no limit.
+        int clueLimitSeconds() const {
+            return clueSeconds;
         }
 
-        // Milliseconds left of the current turn (never negative). Only with a time limit and while the match is going on.
+        int guessLimitSeconds() const {
+            return guessSeconds;
+        }
+
+        // Milliseconds left of the current phase (never negative). Only while the match is going on and the phase has a limit.
         long long millisecondsLeft(Clock::time_point now = Clock::now()) const {
             if (!hasTimeLimit() || isFinished()) {
-                throw logic_error("There is no turn timer running");
+                throw logic_error("There is no timer running");
             }
-            long long left = chrono::duration_cast<chrono::milliseconds>(chrono::seconds(turnSeconds) - (now - turnStartedAt)).count();
+            long long left = chrono::duration_cast<chrono::milliseconds>(chrono::seconds(phaseLimitSeconds()) - (now - phaseStartedAt)).count();
             return left < 0 ? 0 : left;
         }
 
-        // Passes the turn to the other team once for every whole time limit that went by since the turn began, as if
-        // somebody had been watching the clock. Does nothing without a time limit or after the end of the match.
+        // Passes the turn to the other team each time the time of the phase has run out, as if somebody had been watching
+        // the clock. Does nothing when the phase has no limit or the match is over.
         void advanceClock(Clock::time_point now = Clock::now()) {
-            if (!hasTimeLimit() || isFinished()) return;
-            Clock::duration limit = chrono::seconds(turnSeconds);
-            Clock::duration elapsed = now - turnStartedAt;
-            if (elapsed < limit) return;
-            long long periods = elapsed / limit;
-            if (periods % 2 == 1) turn = opposite(turn);
-            turnStartedAt += limit * periods;
-            clueGiven = false;                          // a new turn has begun, even if it is the same team again
-            triesLeft = 0;
-            goodTries = 0;
+            while (!isFinished() && hasTimeLimit()) {
+                Clock::time_point deadline = phaseStartedAt + chrono::seconds(phaseLimitSeconds());
+                if (now < deadline) return;
+                passTurn(deadline);                   // the other team's turn begins at the moment time ran out
+            }
         }
 
         // Has the SPY given the clue of this turn?
@@ -279,6 +287,7 @@ class Match {
             carryOver[sideOf(player.team)] = 0;
             clues.push_back(Clue{player.team, clean, number, extra, 0});
             clueGiven = true;
+            phaseStartedAt = now;                 // the time to guess starts now
             triesLeft = number + extra;
             goodTries = 0;
         }

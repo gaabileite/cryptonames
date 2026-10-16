@@ -14,11 +14,14 @@ using namespace std;
 // A (team, role) seat that a player can take.
 typedef pair<Team, Role> Slot;
 
-// The time limit of each turn of the match. When it runs out, the turn passes to the other team.
-struct TurnTimer {
+// A time limit: off, or a number of seconds. There are two in a match, one for the spy to give the clue and one for
+// the guesser to pick cards. When the time of a phase runs out, the turn passes to the other team.
+struct TimeLimit {
     bool enabled = false;
     int seconds = 60;
 };
+
+enum class TimerPhase { CLUE, GUESS };
 
 // Someone in the waiting room. The seat stays empty until they pick a team and a role.
 struct Member {
@@ -32,7 +35,7 @@ struct Member {
 //   chooseSeat(name, team, role) -> pick or change the seat (not while ready)
 //   setReady(name, ready)      -> (un)mark yourself as ready; needs a seat
 //   chooseUniverses(set)       -> which universes the characters of the match come from (cancels everybody's ready)
-//   chooseTimer(on, seconds)   -> whether each turn has a time limit, and how long (cancels everybody's ready)
+//   chooseTimer(phase, on, seconds) -> whether the clue / the guessing has a time limit, and how long (cancels everybody's ready)
 //   canStart()                 -> every seat is taken and everybody is ready: the match can begin
 // Anything not allowed throws invalid_argument with a message that can be shown to the player.
 // The default rules are 1 SPY and 1 GUESSER per team (4 players); raise the numbers for bigger games.
@@ -42,7 +45,8 @@ class Lobby {
         int guessersPerTeam;
         vector<Member> joined;
         set<M_Universe> chosen;          // the universes the match draws its characters from
-        TurnTimer turnTimer;             // off until somebody turns it on
+        TimeLimit clueLimit;             // both off until somebody turns them on
+        TimeLimit guessLimit;
 
         int seatsFor(Role role) const {
             return role == Role::SPY ? spiesPerTeam : guessersPerTeam;
@@ -93,6 +97,7 @@ class Lobby {
         Lobby(int spiesPerTeam = 1, int guessersPerTeam = 1) {
             this->spiesPerTeam = spiesPerTeam;
             this->guessersPerTeam = guessersPerTeam;
+            guessLimit.seconds = 90;                 // guessing usually takes longer than a clue
             chosen = {M_Universe::MCU, M_Universe::FOX_XMEN, M_Universe::FANTASTIC_FOUR, M_Universe::COMICS,
                       M_Universe::VENOM, M_Universe::SONY_SPIDERMAN, M_Universe::THROUGH_THE_SPIDERVERSE};   // all of them, until someone picks
         }
@@ -170,20 +175,22 @@ class Lobby {
             return chosen;
         }
 
-        // Whether each turn has a time limit, and how many seconds it is. Changing it cancels everybody's ready,
-        // so nobody starts a game with rules they did not agree to. The seconds must be valid even when the timer is off.
-        void chooseTimer(bool enabled, int seconds) {
+        // Whether the clue (or the guessing) has a time limit, and how many seconds it is. Changing it cancels
+        // everybody's ready, so nobody starts a game with rules they did not agree to. The seconds must be valid even
+        // when the limit is off.
+        void chooseTimer(TimerPhase phase, bool enabled, int seconds) {
             if (seconds < minTurnSeconds || seconds > maxTurnSeconds) {
-                throw invalid_argument("A turn can last from " + to_string(minTurnSeconds) + " to " + to_string(maxTurnSeconds) + " seconds");
+                throw invalid_argument("The time can be from " + to_string(minTurnSeconds) + " to " + to_string(maxTurnSeconds) + " seconds");
             }
-            if (enabled == turnTimer.enabled && seconds == turnTimer.seconds) return;
-            turnTimer.enabled = enabled;
-            turnTimer.seconds = seconds;
+            TimeLimit& limit = phase == TimerPhase::CLUE ? clueLimit : guessLimit;
+            if (enabled == limit.enabled && seconds == limit.seconds) return;
+            limit.enabled = enabled;
+            limit.seconds = seconds;
             for (Member& member : joined) member.ready = false;
         }
 
-        const TurnTimer& timer() const {
-            return turnTimer;
+        const TimeLimit& timer(TimerPhase phase) const {
+            return phase == TimerPhase::CLUE ? clueLimit : guessLimit;
         }
 
         // Joins, picks the seat and is ready, all at once (for the console, where there is no waiting room).

@@ -189,115 +189,156 @@ void testUniverses() {
     CHECK(match.viewFor("bs").size() == 25);
 }
 
+// The indexes of the cards with that key, as the spy sees them.
+vector<int> cardsWithKey(const Match& match, const string& spy, CardKey key) {
+    vector<int> found;
+    vector<CardView> view = match.viewFor(spy);
+    for (int i = 0; i < 25; i++) if (view[i].key == key) found.push_back(i);
+    return found;
+}
+
+// A lobby whose seats are taken and everybody is ready, with the given time limits (0 = off).
+Lobby lobbyWithLimits(int clueSeconds, int guessSeconds) {
+    Lobby lobby = fullLobby();
+    lobby.chooseTimer(TimerPhase::CLUE, clueSeconds > 0, clueSeconds > 0 ? clueSeconds : 60);
+    lobby.chooseTimer(TimerPhase::GUESS, guessSeconds > 0, guessSeconds > 0 ? guessSeconds : 90);
+    for (string name : {"bs", "bg", "rs", "rg"}) lobby.setReady(name, true);
+    return lobby;
+}
+
 void testTimer() {
     typedef Match::Clock Clock;
     auto at = [](Clock::time_point start, int seconds) { return start + chrono::seconds(seconds); };
 
-    // ---- the waiting room setting
+    // ---- the waiting room settings: two limits, each on its own
     Lobby lobby = fullLobby();
-    CHECK(!lobby.timer().enabled && lobby.timer().seconds == 60);                  // off, 60 s once turned on
-    CHECK(rejects([&] { lobby.chooseTimer(true, Lobby::minTurnSeconds - 1); }));
-    CHECK(rejects([&] { lobby.chooseTimer(true, Lobby::maxTurnSeconds + 1); }));
-    CHECK(rejects([&] { lobby.chooseTimer(false, 5); }));                          // the seconds must be valid even when off
-    CHECK(rejects([&] { lobby.chooseTimer(true, -3); }));
-    CHECK(lobby.canStart() && !lobby.timer().enabled);                             // rejected choices change nothing
-    lobby.chooseTimer(false, 60);                                                  // the same choice: nobody is un-readied
+    CHECK(!lobby.timer(TimerPhase::CLUE).enabled && lobby.timer(TimerPhase::CLUE).seconds == 60);     // both off; 60 s and 90 s once on
+    CHECK(!lobby.timer(TimerPhase::GUESS).enabled && lobby.timer(TimerPhase::GUESS).seconds == 90);
+    for (TimerPhase phase : {TimerPhase::CLUE, TimerPhase::GUESS}) {
+        CHECK(rejects([&] { lobby.chooseTimer(phase, true, Lobby::minTurnSeconds - 1); }));
+        CHECK(rejects([&] { lobby.chooseTimer(phase, true, Lobby::maxTurnSeconds + 1); }));
+        CHECK(rejects([&] { lobby.chooseTimer(phase, false, 5); }));                                  // valid seconds even when off
+        CHECK(rejects([&] { lobby.chooseTimer(phase, true, -3); }));
+    }
+    CHECK(lobby.canStart() && !lobby.timer(TimerPhase::CLUE).enabled && !lobby.timer(TimerPhase::GUESS).enabled);   // rejections change nothing
+    lobby.chooseTimer(TimerPhase::CLUE, false, 60);                                                   // the same choice: nobody is un-readied
+    lobby.chooseTimer(TimerPhase::GUESS, false, 90);
     CHECK(lobby.canStart());
-    lobby.chooseTimer(true, 90);
-    CHECK(lobby.timer().enabled && lobby.timer().seconds == 90 && !lobby.canStart());   // a new choice cancels everybody's ready
+    lobby.chooseTimer(TimerPhase::CLUE, true, 45);
+    CHECK(lobby.timer(TimerPhase::CLUE).enabled && lobby.timer(TimerPhase::CLUE).seconds == 45 && !lobby.canStart());   // cancels ready
+    CHECK(!lobby.timer(TimerPhase::GUESS).enabled && lobby.timer(TimerPhase::GUESS).seconds == 90);   // the other limit is untouched
     for (string name : {"bs", "bg", "rs", "rg"}) lobby.setReady(name, true);
-    lobby.chooseTimer(true, Lobby::minTurnSeconds);                                // the limits are allowed
-    lobby.chooseTimer(true, Lobby::maxTurnSeconds);
-    lobby.chooseTimer(false, 120);                                                 // off, but remembers the seconds
-    CHECK(!lobby.timer().enabled && lobby.timer().seconds == 120);
+    lobby.chooseTimer(TimerPhase::GUESS, true, 120);
+    CHECK(!lobby.canStart() && lobby.timer(TimerPhase::GUESS).seconds == 120 && lobby.timer(TimerPhase::CLUE).seconds == 45);
+    lobby.chooseTimer(TimerPhase::GUESS, true, Lobby::minTurnSeconds);
+    lobby.chooseTimer(TimerPhase::GUESS, true, Lobby::maxTurnSeconds);                                // the limits are allowed
+    lobby.chooseTimer(TimerPhase::CLUE, false, 120);                                                  // off, but remembers the seconds
+    CHECK(!lobby.timer(TimerPhase::CLUE).enabled && lobby.timer(TimerPhase::CLUE).seconds == 120);
 
-    // ---- no timer: time never matters
+    // ---- no limits: time never matters
     {
         Clock::time_point start = Clock::now();
         Match match(fullLobby(), characters(), start);
-        CHECK(!match.hasTimeLimit() && match.turnLimitSeconds() == 0);
+        CHECK(!match.hasTimeLimit() && match.clueLimitSeconds() == 0 && match.guessLimitSeconds() == 0 && match.phaseLimitSeconds() == 0);
         Team team = match.currentTeam();
         match.advanceClock(at(start, 100000));
         CHECK(match.currentTeam() == team);
         try { match.millisecondsLeft(start); CHECK(false); } catch (const logic_error&) {}
     }
 
-    // ---- with a timer of 30 s
-    Lobby timed = fullLobby();
-    timed.chooseTimer(true, 30);
-    for (string name : {"bs", "bg", "rs", "rg"}) timed.setReady(name, true);
+    // ---- only the clue is limited (30 s): the guessing can take as long as it needs
     {
         Clock::time_point start = Clock::now();
-        Match match(timed, characters(), start);
+        Match match(lobbyWithLimits(30, 0), characters(), start);
         Team team = match.currentTeam(), other = otherThan(team);
-        CHECK(match.hasTimeLimit() && match.turnLimitSeconds() == 30);
-        CHECK(match.millisecondsLeft(start) == 30000);
-        CHECK(match.millisecondsLeft(at(start, 12)) == 18000);
-        CHECK(match.millisecondsLeft(at(start, 99)) == 0);                         // never negative
+        CHECK(match.hasTimeLimit() && match.phaseLimitSeconds() == 30 && match.clueLimitSeconds() == 30 && match.guessLimitSeconds() == 0);
+        CHECK(match.millisecondsLeft(at(start, 10)) == 20000);
+        match.giveClue(spyOf(team), "ON TIME", 2, at(start, 29));
+        CHECK(!match.hasTimeLimit());                                              // the guessing phase has no limit
+        match.advanceClock(at(start, 100000));
+        CHECK(match.currentTeam() == team && match.hasClue());                     // so nothing happens, however long it takes
+        match.endTurn(guesserOf(team), at(start, 100000));
+        CHECK(match.currentTeam() == other && match.millisecondsLeft(at(start, 100000)) == 30000);   // the other team's clue has its 30 s
+    }
 
+    // ---- only the guessing is limited (40 s): the clue can take as long as the spy needs
+    {
+        Clock::time_point start = Clock::now();
+        Match match(lobbyWithLimits(0, 40), characters(), start);
+        Team team = match.currentTeam();
+        CHECK(!match.hasTimeLimit() && match.guessLimitSeconds() == 40);
+        match.advanceClock(at(start, 100000));
+        CHECK(match.currentTeam() == team && !match.hasClue());
+        match.giveClue(spyOf(team), "FINALLY", 2, at(start, 100000));
+        CHECK(match.hasTimeLimit() && match.phaseLimitSeconds() == 40);
+        CHECK(match.millisecondsLeft(at(start, 100000)) == 40000);                 // the guessing time starts at the clue
+        CHECK(match.millisecondsLeft(at(start, 100015)) == 25000);
+    }
+
+    // ---- both limited: 30 s for the clue, 60 s for the guessing
+    {
+        Clock::time_point start = Clock::now();
+        Match match(lobbyWithLimits(30, 60), characters(), start);
+        Team team = match.currentTeam(), other = otherThan(team);
+        CHECK(match.millisecondsLeft(start) == 30000 && match.millisecondsLeft(at(start, 99)) == 0);   // never negative
         match.advanceClock(at(start, 29));
         CHECK(match.currentTeam() == team);                                        // not yet
-        match.advanceClock(at(start, 30));
-        CHECK(match.currentTeam() == other);                                       // time is up: the turn passes
-        CHECK(match.millisecondsLeft(at(start, 30)) == 30000);                     // and the new turn has all its time
-        CHECK(match.millisecondsLeft(at(start, 45)) == 15000);
-        match.advanceClock(at(start, 59));
-        CHECK(match.currentTeam() == other);
-        match.advanceClock(at(start, 60));
+        match.giveClue(spyOf(team), "QUICK", 3, at(start, 25));                    // given with 5 s to spare...
+        CHECK(match.millisecondsLeft(at(start, 25)) == 60000);                     // ...and the guessing still has its whole 60 s
+        CHECK(match.millisecondsLeft(at(start, 40)) == 45000);
+        match.advanceClock(at(start, 84));
+        CHECK(match.currentTeam() == team && match.hasClue());
+        match.advanceClock(at(start, 85));                                         // 25 + 60: the guessing time is up
+        CHECK(match.currentTeam() == other && !match.hasClue());                   // the turn passes
+        CHECK(match.millisecondsLeft(at(start, 85)) == 30000);                     // and the other spy has a fresh 30 s for the clue
+        CHECK(match.pendingExtraTries(team) == 0);                                 // nothing is carried over
+        CHECK(!match.isFinished() && match.remaining(Team::BLUE) == 8 && match.remaining(Team::RED) == 8);
+
+        match.advanceClock(at(start, 115));                                        // the other spy was too slow
+        CHECK(match.currentTeam() == team && !match.hasClue());
+        CHECK(match.clueHistory().size() == 1);                                    // no clue was given by them
+        match.advanceClock(at(start, 115));                                        // calling it again changes nothing
         CHECK(match.currentTeam() == team);
-        match.advanceClock(at(start, 60));                                         // calling it again changes nothing
-        CHECK(match.currentTeam() == team);
-        CHECK(!match.isFinished() && match.remaining(Team::BLUE) == 8 && match.remaining(Team::RED) == 8);   // no card is touched
     }
-    { // nobody looked at the clock for a long time: it is as if somebody had been watching it
+    { // nobody looked at the clock for a long time: as if somebody had been watching it (only clue limits: every 30 s)
         Clock::time_point start = Clock::now();
-        Match match(timed, characters(), start);
+        Match match(lobbyWithLimits(30, 60), characters(), start);
         Team team = match.currentTeam();
-        match.advanceClock(at(start, 30 * 5 + 7));                                 // five full turns went by: an odd number
+        match.advanceClock(at(start, 30 * 5 + 7));                                 // five clue times ran out: an odd number
         CHECK(match.currentTeam() == otherThan(team));
-        CHECK(match.millisecondsLeft(at(start, 30 * 5 + 7)) == 23000);             // and 7 s of the sixth turn are gone
+        CHECK(match.millisecondsLeft(at(start, 30 * 5 + 7)) == 23000);
         match.advanceClock(at(start, 30 * 6 + 1));
-        CHECK(match.currentTeam() == team);                                        // six full turns: back to the first team
-    }
-    { // a guess after the time is up is a guess in the other team's turn
-        Clock::time_point start = Clock::now();
-        Match match(timed, characters(), start);
-        Team team = match.currentTeam();
-        CHECK(rejects([&] { match.guess(guesserOf(team), 0, at(start, 31)); }));   // too late for them
-        CHECK(match.currentTeam() == otherThan(team));
-        CHECK(match.remaining(Team::BLUE) == 8 && match.remaining(Team::RED) == 8);
-        clueFor(match, 3, at(start, 31));                                          // the other team's turn: their spy gives the clue
-        match.guess(guesserOf(otherThan(team)), 0, at(start, 31));                 // and their guesser can play
-        CHECK(match.viewFor("bs")[0].state == CardState::REVEALED);               // and their guess counted
-    }
-    { // ending the turn, or a wrong guess, gives the next team a full turn; a right guess gives no extra time
-        Clock::time_point start = Clock::now();
-        Match match(timed, characters(), start);
-        Team team = match.currentTeam(), other = otherThan(team);
-        vector<CardView> spy = match.viewFor(spyOf(team));
-        int mine = -1, mine2 = -1, beige = -1;
-        for (int i = 0; i < 25; i++) {
-            if (spy[i].key == keyOf(team)) (mine < 0 ? mine : mine2) = i;
-            if (spy[i].key == CardKey::BEIGE) beige = i;
-        }
-        clueFor(match, 5, at(start, 3));                                           // the clue takes part of the 30 s too
-        match.guess(guesserOf(team), mine, at(start, 20));                         // right: the turn goes on...
-        CHECK(match.currentTeam() == team && match.millisecondsLeft(at(start, 20)) == 10000);   // ...and the clock was not reset
-        match.guess(guesserOf(team), mine2, at(start, 25));
-        CHECK(match.millisecondsLeft(at(start, 25)) == 5000);
-        match.guess(guesserOf(team), beige, at(start, 28));                        // wrong: the turn passes
-        CHECK(match.currentTeam() == other && match.millisecondsLeft(at(start, 28)) == 30000);
-        clueFor(match, 2, at(start, 29));
-        match.endTurn(guesserOf(other), at(start, 40));                            // ending it also starts the next one fresh
-        CHECK(match.currentTeam() == team && match.millisecondsLeft(at(start, 40)) == 30000);
-        match.advanceClock(at(start, 69));
         CHECK(match.currentTeam() == team);
-        match.advanceClock(at(start, 70));
-        CHECK(match.currentTeam() == other);
+    }
+    { // a late clue or guess belongs to the other team's turn
+        Clock::time_point start = Clock::now();
+        Match match(lobbyWithLimits(30, 60), characters(), start);
+        Team team = match.currentTeam();
+        CHECK(rejects([&] { match.giveClue(spyOf(team), "LATE", 1, at(start, 31)); }));
+        CHECK(match.currentTeam() == otherThan(team) && !match.hasClue());
+        match.giveClue(spyOf(otherThan(team)), "ON TIME", 3, at(start, 40));      // their 30 s began at 30
+        CHECK(match.hasClue());
+        vector<int> mine = cardsWithKey(match, spyOf(otherThan(team)), keyOf(otherThan(team)));
+        match.guess(guesserOf(otherThan(team)), mine[0], at(start, 99));          // the time is up at 40 + 60 = 100: this is just in time
+        CHECK(match.currentTeam() == otherThan(team) && match.currentClue().found == 1);
+        CHECK(rejects([&] { match.guess(guesserOf(otherThan(team)), mine[1], at(start, 100)); }));   // exactly when the time is up: too late
+        CHECK(match.currentTeam() == team && !match.hasClue());
+        CHECK(match.viewFor("bs")[mine[1]].state == CardState::SECRET);            // and that card was not revealed
+    }
+    { // a right guess gives no extra time; ending the turn on purpose starts the next clue time fresh
+        Clock::time_point start = Clock::now();
+        Match match(lobbyWithLimits(30, 60), characters(), start);
+        Team team = match.currentTeam(), other = otherThan(team);
+        vector<int> mine = cardsWithKey(match, spyOf(team), keyOf(team));
+        match.giveClue(spyOf(team), "STEADY", 3, at(start, 4));
+        match.guess(guesserOf(team), mine[0], at(start, 24));
+        CHECK(match.millisecondsLeft(at(start, 24)) == 40000);                     // 60 - 20: the right guess did not reset it
+        match.endTurn(guesserOf(team), at(start, 28));
+        CHECK(match.currentTeam() == other && match.millisecondsLeft(at(start, 28)) == 30000);
     }
     { // after the end of the match the clock stops
         Clock::time_point start = Clock::now();
-        Match match(timed, characters(), start);
+        Match match(lobbyWithLimits(30, 60), characters(), start);
         Team team = match.currentTeam();
         match.forfeit(guesserOf(team));
         Team winner = match.winner();
@@ -308,13 +349,7 @@ void testTimer() {
     }
 }
 
-// The indexes of the cards with that key, as the spy sees them.
-vector<int> cardsWith(const Match& match, const string& spy, CardKey key) {
-    vector<int> found;
-    vector<CardView> view = match.viewFor(spy);
-    for (int i = 0; i < 25; i++) if (view[i].key == key) found.push_back(i);
-    return found;
-}
+vector<int> cardsWith(const Match& match, const string& spy, CardKey key) { return cardsWithKey(match, spy, key); }
 
 void testClues() {
     typedef Match::Clock Clock;
@@ -449,23 +484,24 @@ void testClues() {
 
     // ---- time: running out of time gives no extra tries and wipes the clue
     {
-        Lobby timed = fullLobby();
-        timed.chooseTimer(true, 30);
-        for (string name : {"bs", "bg", "rs", "rg"}) timed.setReady(name, true);
         Clock::time_point start = Clock::now();
-        Match match(timed, characters(), start);
+        Match match(lobbyWithLimits(30, 30), characters(), start);
         Team team = match.currentTeam(), other = otherThan(team);
         vector<int> mine = cardsWith(match, spyOf(team), keyOf(team));
-        match.giveClue(spyOf(team), "SLOW", 4, at(start, 5));
+        match.giveClue(spyOf(team), "SLOW", 4, at(start, 5));                    // the 30 s of guessing run until second 35
         match.guess(guesserOf(team), mine[0], at(start, 10));
-        match.advanceClock(at(start, 30));                                       // the 30 s are up
+        match.advanceClock(at(start, 34));
+        CHECK(match.currentTeam() == team && match.hasClue());
+        match.advanceClock(at(start, 35));                                       // the guessing time is up
         CHECK(match.currentTeam() == other && !match.hasClue() && match.triesRemaining() == 0);
         CHECK(match.pendingExtraTries(team) == 0);
         CHECK(match.clueHistory().size() == 1 && match.clueHistory()[0].found == 1);
-        CHECK(rejects([&] { match.giveClue(spyOf(team), "LATE", 1, at(start, 31)); }));   // it is not their turn any more
-        match.giveClue(spyOf(other), "FAST", 2, at(start, 31));
-        // a whole number of periods later it is the same team again, but it is a new turn: a new clue is needed
-        match.advanceClock(at(start, 30 + 60));
+        CHECK(rejects([&] { match.giveClue(spyOf(team), "LATE", 1, at(start, 36)); }));   // it is not their turn any more
+        match.giveClue(spyOf(other), "FAST", 2, at(start, 40));
+        match.advanceClock(at(start, 70));                                       // their guessing time is up too
+        CHECK(match.currentTeam() == team && !match.hasClue());
+        // the clue time of the first team runs out as well: it is the other team again, and a new clue is needed
+        match.advanceClock(at(start, 100));
         CHECK(match.currentTeam() == other && !match.hasClue());
     }
 
@@ -685,18 +721,28 @@ void testForfeit() {
     }
 }
 
+// Runs one group of tests. An exception that nobody expected counts as a failure and says which group it was in.
+void run(const char* name, void (*group)()) {
+    try {
+        group();
+    } catch (const exception& e) {
+        cout << "FAIL in " << name << ": unexpected exception: " << e.what() << endl;
+        failures++;
+    }
+}
+
 int main() {
-    testEnums();
-    testLobby();
-    testWaitingRoom();
-    testUniverses();
-    testTimer();
-    testClues();
-    testGrid();
-    testMatchSetupAndViews();
-    testMatchPermissions();
-    testMatchOutcomes();
-    testForfeit();
+    run("enums", testEnums);
+    run("lobby", testLobby);
+    run("waiting room", testWaitingRoom);
+    run("universes", testUniverses);
+    run("timer", testTimer);
+    run("clues", testClues);
+    run("grid", testGrid);
+    run("match setup and views", testMatchSetupAndViews);
+    run("match permissions", testMatchPermissions);
+    run("match outcomes", testMatchOutcomes);
+    run("forfeit", testForfeit);
 
     if (failures == 0) cout << "All tests passed" << endl;
     else cout << failures << " check(s) failed" << endl;

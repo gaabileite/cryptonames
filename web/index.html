@@ -47,13 +47,8 @@
             </fieldset>
 
             <fieldset class="timer-setup">
-                <legend>Turn timer</legend>
-                <label class="check-row"><input id="timer-on" type="checkbox"> Limit how long each turn can take</label>
-                <div class="timer-seconds">
-                    <label for="timer-seconds">Seconds per turn</label>
-                    <input id="timer-seconds" type="number" inputmode="numeric" min="15" max="600" step="5" value="60">
-                    <span id="timer-presets" class="presets"></span>
-                </div>
+                <legend>Time limits</legend>
+                <div id="timer-rows" class="timer-rows"></div>
                 <p id="timer-note" class="note small"></p>
             </fieldset>
 
