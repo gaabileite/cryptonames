@@ -1,4 +1,6 @@
-# Online Boardgame
+<p align="center"><img src="web/brand/wordmark.png" alt="CryptoNames" width="420"></p>
+
+# CryptoNames
 
 A two-team spy game played on a 5x5 grid of Marvel character cards. Each team (BLUE and RED) has a SPY and a GUESSER. Spies see the colour of every card (BLUE, RED, BEIGE or BLACK); guessers see every card as BEIGE until it is revealed.
 
@@ -6,12 +8,13 @@ A two-team spy game played on a 5x5 grid of Marvel character cards. Each team (B
 
 | Folder | What is in it |
 |---|---|
-| `src/game/` | The game rules: `Card`, `Grid`, `Player`, `Lobby`, `Match` and the enums. No input or output. |
+| `src/game/` | The game rules: `Card`, `Grid`, `Player`, `Lobby`, `Match`, `Clue`, `Room`, `RoomRegistry` and the enums. No input or output. |
 | `src/db/` | Loads the characters from the SQLite database. |
 | `src/console/` | The game played in the terminal. |
 | `src/server/` | The HTTP server (JSON API) a front-end talks to. The endpoints are listed at the top of `server.cpp`. |
 | `tests/` | Tests for the game rules. |
 | `data/` | `characters.db`, the characters table. |
+| `assets/brand/` | The original logo and wordmark of CryptoNames. The web-sized versions and the favicons are in `web/brand/`. |
 | `assets/images/` | The four coloured cards of each character: `<universe>/<character>/{blue,red,beige,black}.png`. |
 | `third_party/` | Single-header libraries: cpp-httplib and nlohmann/json (both MIT). |
 | `web/` | The front-end (plain HTML, CSS and JavaScript), served at `/` by the server. |

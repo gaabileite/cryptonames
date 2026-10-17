@@ -1,37 +1,22 @@
+/* The palette of CryptoNames: three colours from the logo, and the neutrals around them.
+     main background  #1d1e1e      blue  #3368d8      red  #e11736
+   Text on a team colour is white (4.8:1 or better), so team colours are used as fills and borders. */
 :root {
-    --bg: #f6f3ec;
-    --surface: #ffffff;
-    --text: #1d1b16;
-    --muted: #6b665a;
-    --border: #d9d3c3;
-    --blue: #2563c9;
-    --red: #c93a3a;
+    color-scheme: dark;                /* form fields and scrollbars follow the dark theme */
+    --bg: #1d1e1e;
+    --surface: #232525;
+    --text: #f2f3f3;
+    --muted: #a9adad;
+    --border: #3d4040;
+    --blue: #3368d8;
+    --red: #e11736;
     --on-team: #ffffff;
-    --accent: #1d1b16;
+    --accent: var(--blue);             /* the main buttons */
     --on-accent: #ffffff;
-    --error: #b3261e;
-    --ok: #1d7a3a;
-    --on-ok: #ffffff;
-    --shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
-}
-
-@media (prefers-color-scheme: dark) {
-    :root {
-        --bg: #17160f;
-        --surface: #232118;
-        --text: #f1eee4;
-        --muted: #a29d8c;
-        --border: #3b382b;
-        --blue: #5b8def;
-        --red: #ef6b6b;
-        --on-team: #101010;
-        --accent: #f1eee4;
-        --on-accent: #17160f;
-        --error: #f2b8b5;
-        --ok: #6fd08c;
-        --on-ok: #0b2a14;
-        --shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
-    }
+    --error: #ff7c8e;                  /* a lighter red, for text on the dark background */
+    --ok: #6fd08c;
+    --on-ok: #0b2a14;
+    --shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
 }
 
 * { box-sizing: border-box; }
@@ -53,9 +38,11 @@ body {
     gap: 8px 16px;
     padding: 12px 16px;
     border-bottom: 1px solid var(--border);
-    background: var(--surface);
+    background: var(--bg);             /* the logo has the same background, so it melts into the bar */
 }
-.topbar h1 { margin: 0; font-size: 1.15rem; }
+.topbar h1 { margin: 0; line-height: 0; }
+.brand { display: block; height: 54px; width: auto; }
+.brand-link { display: inline-block; }
 
 .whoami {
     display: inline-flex;
@@ -76,8 +63,8 @@ h3 { margin: 28px 0 8px; font-size: 1rem; color: var(--muted); }
 .connection {
     padding: 8px 16px;
     text-align: center;
-    background: var(--error);
-    color: var(--bg);
+    background: var(--red);
+    color: var(--on-team);
     font-weight: 600;
 }
 
@@ -338,11 +325,11 @@ button:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
     padding: 6px 14px;
     font-weight: 700;
     white-space: nowrap;
+    color: var(--on-team);
     border-radius: 8px;
-    border: 2px solid currentColor;
 }
-.score.team-BLUE { color: var(--blue); }
-.score.team-RED { color: var(--red); }
+.score.team-BLUE { background: var(--blue); }
+.score.team-RED { background: var(--red); }
 .hint { margin: 0; text-align: center; color: var(--muted); }
 
 .board {
@@ -417,8 +404,8 @@ button.danger {
     border: 2px solid var(--error);
     border-radius: 8px;
 }
-button.danger:hover { color: var(--bg); background: var(--error); }
-button.danger.solid { color: var(--bg); background: var(--error); }
+button.danger:hover { color: var(--on-team); background: var(--red); border-color: var(--red); }
+button.danger.solid { color: var(--on-team); background: var(--red); border-color: var(--red); }
 button.danger:disabled { opacity: 0.4; cursor: not-allowed; }
 .confirm-box { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px 16px; font-weight: 600; }
 
@@ -438,7 +425,7 @@ button.danger:disabled { opacity: 0.4; cursor: not-allowed; }
     border-radius: 10px;
     box-shadow: var(--shadow);
 }
-.toast.error { background: var(--error); color: var(--bg); }
+.toast.error { background: var(--red); color: var(--on-team); }
 
 @media (max-width: 900px) {
     .board { grid-template-columns: repeat(3, 1fr); }

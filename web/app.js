@@ -1,4 +1,4 @@
-// Front-end of the board game. Talks to the JSON API of the server (see src/server/server.cpp).
+// Front-end of CryptoNames. Talks to the JSON API of the server (see src/server/server.cpp).
 // Three screens: join (just a name), wait (pick a team and a role, then press ready) and game (board + end-turn button).
 // The page asks the server for the state every POLL_MS; everything the player sees comes from the server.
 (() => {

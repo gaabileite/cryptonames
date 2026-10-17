@@ -1,4 +1,4 @@
-// HTTP server for the board game: many rooms at once, each with its own waiting room and match.
+// HTTP server for CryptoNames: many rooms at once, each with its own waiting room and match.
 //
 // Build: make server
 // Run:   build/server [port] [host]      (defaults: 8080 127.0.0.1) - run it from the project folder.
