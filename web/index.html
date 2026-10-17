@@ -57,7 +57,9 @@
             <p id="wait-count" class="note"></p>
 
             <div id="teams" class="teams"></div>
+            <p id="coop-note" class="note coop-note" hidden></p>
             <p id="wait-unseated" class="note" hidden></p>
+            <p id="players-note" class="note small"></p>
             <fieldset class="universes">
                 <legend>Universes in this game</legend>
                 <div id="universe-list" class="universe-list"></div>
@@ -122,6 +124,16 @@
             </div>
         </section>
     </main>
+
+    <!-- Shown when a game with only 2 or 3 players begins -->
+    <div id="coop-alert" class="overlay" hidden>
+        <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="coop-title" aria-describedby="coop-text">
+            <h2 id="coop-title">Co-operative game</h2>
+            <p id="coop-text"></p>
+            <p id="coop-detail" class="note"></p>
+            <button id="coop-ok" type="button" class="primary">OK</button>
+        </div>
+    </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 

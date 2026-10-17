@@ -10,20 +10,28 @@
 using namespace std;
 
 // Console version of the player assignment. A front-end replaces this function
-// and calls lobby.openSlots() / lobby.addPlayer() itself.
+// and calls lobby.join() / lobby.chooseSeat() / lobby.setReady() itself.
+// Players are added until nobody else wants to join and the lobby has what it needs (see Lobby::missing).
 void assignPlayersFromConsole(Lobby& lobby) {
+    const Slot choices[4] = {Slot(Team::BLUE, Role::SPY), Slot(Team::BLUE, Role::GUESSER),
+                             Slot(Team::RED, Role::SPY), Slot(Team::RED, Role::GUESSER)};
     while (!lobby.isFull()) {
-        cout << "\nPlayer " << lobby.players().size() + 1 << " of " << lobby.totalSeats() << endl;
+        // The names are needed first, to know how many are playing: fewer than 4 is a co-operative game
+        cout << "\nPlayer " << lobby.players().size() + 1;
+        if (!lobby.players().empty() && lobby.missing().empty()) cout << " (leave the name empty to start)";
+        cout << endl;
 
         cout << "Name: ";
         string name;
         if (!getline(cin, name)) {
             throw runtime_error("Input closed before all players joined");
         }
+        if (name.find_first_not_of(" \t\r\n") == string::npos && !lobby.players().empty() && lobby.missing().empty()) {
+            break;
+        }
 
-        vector<Slot> slots = lobby.openSlots();
-        for (size_t i = 0; i < slots.size(); i++) {
-            cout << "  " << i + 1 << ") " << toString(slots[i].first) << " " << toString(slots[i].second) << endl;
+        for (size_t i = 0; i < 4; i++) {
+            cout << "  " << i + 1 << ") " << toString(choices[i].first) << " " << toString(choices[i].second) << endl;
         }
         cout << "Pick a team and role: ";
         string choice;
@@ -38,13 +46,14 @@ void assignPlayersFromConsole(Lobby& lobby) {
             } catch (const exception&) {
                 // leaves index out of range, handled below
             }
-            if (index < 0 || index >= (int)slots.size()) {
+            if (index < 0 || index >= 4) {
                 throw invalid_argument("Pick a number from the list");
             }
-            lobby.addPlayer(name, slots[index].first, slots[index].second);
+            lobby.addPlayer(name, choices[index].first, choices[index].second);
         } catch (const invalid_argument& e) {
             cout << "Could not add player: " << e.what() << ". Try again." << endl;
         }
+        if (!lobby.players().empty() && !lobby.missing().empty()) cout << lobby.missing() << endl;
     }
 }
 
@@ -59,6 +68,7 @@ void printBoard(const vector<CardView>& view) {
     }
 }
 
+// The first player with that team and role (a team can have several).
 string nameOf(const Match& match, Team team, Role role) {
     for (const Player& player : match.players()) {
         if (player.team == team && player.role == role) return player.name;
@@ -68,6 +78,11 @@ string nameOf(const Match& match, Team team, Role role) {
 
 // Console version of the turns: the GUESSER of the current team types a card number.
 void playFromConsole(Match& match) {
+    if (match.isCooperative()) {
+        cout << "\nOnly " << match.players().size() << " players: this is a co-operative game. Everybody is on the BLUE team."
+             << " Find all the BLUE cards; RED cards end the turn and the BLACK card loses." << endl;
+        for (const Player& player : match.players()) cout << "  " << player.name << ": " << toString(player.role) << endl;
+    }
     while (!match.isFinished()) {
         Team team = match.currentTeam();
         string guesser = nameOf(match, team, Role::GUESSER);
@@ -120,8 +135,9 @@ void playFromConsole(Match& match) {
             if (input == "s") {
                 printBoard(match.viewFor(nameOf(match, team, Role::SPY)));
             } else if (input == "f") {
-                cout << "Team " << toString(team) << " gives up and Team " << toString(team == Team::BLUE ? Team::RED : Team::BLUE)
-                     << " wins. Type yes to confirm: ";
+                if (match.isCooperative()) cout << "The team gives up and loses. Type yes to confirm: ";
+                else cout << "Team " << toString(team) << " gives up and Team " << toString(team == Team::BLUE ? Team::RED : Team::BLUE)
+                          << " wins. Type yes to confirm: ";
                 string answer;
                 getline(cin, answer);
                 if (answer == "yes") match.forfeit(guesser);
@@ -146,7 +162,11 @@ void playFromConsole(Match& match) {
     }
 
     if (match.wasForfeited()) cout << "\nTeam " << toString(match.forfeitedBy()) << " forfeited." << endl;
-    cout << "\nThe match is over. Team " << toString(match.winner()) << " wins!" << endl;
+    if (match.isCooperative()) {
+        cout << "\nThe match is over. " << (match.winner() == Team::BLUE ? "You found every BLUE card: you win!" : "You lose.") << endl;
+    } else {
+        cout << "\nThe match is over. Team " << toString(match.winner()) << " wins!" << endl;
+    }
 }
 
 int main() {

@@ -57,11 +57,10 @@ void testEnums() {
 
 void testLobby() {
     Lobby lobby;
-    CHECK(lobby.totalSeats() == 4 && lobby.openSlots().size() == 4 && !lobby.isFull());
+    CHECK(!lobby.isFull() && lobby.members().empty() && !lobby.canStart());
+    CHECK(lobby.missing() == "At least 2 players are needed to start.");
 
     lobby.addPlayer("Ana", Team::BLUE, Role::SPY);
-    CHECK(!lobby.isOpen(Team::BLUE, Role::SPY) && lobby.openSlots().size() == 3);
-    CHECK(rejects([&] { lobby.addPlayer("Bia", Team::BLUE, Role::SPY); }));      // seat taken
     CHECK(rejects([&] { lobby.addPlayer("Ana", Team::RED, Role::SPY); }));       // duplicate name
     CHECK(rejects([&] { lobby.addPlayer("  Ana ", Team::RED, Role::SPY); }));    // duplicate once trimmed
     CHECK(rejects([&] { lobby.addPlayer("", Team::RED, Role::SPY); }));
@@ -71,15 +70,21 @@ void testLobby() {
     CHECK(rejects([&] { lobby.addPlayer("Bia", "RED", "BOSS"); }));
     CHECK(lobby.players().size() == 1);                                          // rejections add nothing
 
-    lobby.addPlayer("  Bia  ", "BLUE", "GUESSER");
+    lobby.addPlayer("  Bia  ", "BLUE", "SPY");                                   // several players can share a seat
     CHECK(lobby.players()[1].name == "Bia");                                     // stored trimmed
     lobby.addPlayer(string(Lobby::maxNameLength, 'x'), "RED", "SPY");
     CHECK(!lobby.isFull());
-    lobby.addPlayer("Dani", Team::RED, Role::GUESSER);
-    CHECK(lobby.isFull() && lobby.openSlots().empty());
+    for (int i = 3; i < Lobby::maxPlayers; i++) lobby.addPlayer("p" + to_string(i), Team::RED, Role::GUESSER);
+    CHECK(lobby.isFull() && lobby.members().size() == 10);                       // ten players at most
+    CHECK(rejects([&] { lobby.addPlayer("one too many", Team::BLUE, Role::GUESSER); }));
+    CHECK(rejects([&] { lobby.join("one too many"); }));
+}
 
-    Lobby big(2, 3);
-    CHECK(big.totalSeats() == 10 && big.openSlots().size() == 10);
+// The seats of a lobby of the given (team, role) choices, everybody ready. Names are "p0", "p1", ...
+Lobby lobbyOf(vector<Slot> seats) {
+    Lobby lobby;
+    for (size_t i = 0; i < seats.size(); i++) lobby.addPlayer("p" + to_string(i), seats[i].first, seats[i].second);
+    return lobby;
 }
 
 void testWaitingRoom() {
@@ -87,7 +92,7 @@ void testWaitingRoom() {
     lobby.join("  Ana ");
     CHECK(lobby.members().size() == 1 && lobby.members()[0].name == "Ana");     // trimmed, no seat yet
     CHECK(!lobby.members()[0].seat && !lobby.members()[0].ready);
-    CHECK(lobby.players().empty() && lobby.openSlots().size() == 4);            // joining takes no seat
+    CHECK(lobby.players().empty());                                            // joining takes no seat
     CHECK(rejects([&] { lobby.join("Ana"); }));                                // duplicate name
     CHECK(rejects([&] { lobby.join("   "); }));
     CHECK(rejects([&] { lobby.setReady("Ana", true); }));                      // needs a seat first
@@ -95,27 +100,41 @@ void testWaitingRoom() {
     CHECK(rejects([&] { lobby.setReady("Nobody", true); }));
 
     lobby.chooseSeat("Ana", Team::BLUE, Role::SPY);
-    CHECK(lobby.openSlots().size() == 3 && !lobby.isOpen(Team::BLUE, Role::SPY));
     lobby.chooseSeat("Ana", Team::BLUE, Role::SPY);                            // the seat she already has is fine
-    lobby.chooseSeat("Ana", Team::RED, Role::GUESSER);                         // changing frees the old seat
-    CHECK(lobby.isOpen(Team::BLUE, Role::SPY) && !lobby.isOpen(Team::RED, Role::GUESSER));
+    lobby.chooseSeat("Ana", Team::RED, Role::GUESSER);                         // changing is allowed
+    CHECK(*lobby.members()[0].seat == Slot(Team::RED, Role::GUESSER));
 
     lobby.join("Bia");
-    CHECK(rejects([&] { lobby.chooseSeat("Bia", Team::RED, Role::GUESSER); })); // taken by Ana
-    lobby.chooseSeat("Bia", Team::BLUE, Role::SPY);                            // the seat Ana left
+    lobby.chooseSeat("Bia", Team::RED, Role::GUESSER);                         // the same seat as Ana: seats are not limited
+    CHECK(lobby.players().size() == 2);
 
     lobby.setReady("Ana", true);
     CHECK(rejects([&] { lobby.chooseSeat("Ana", Team::BLUE, Role::GUESSER); })); // locked while ready
     lobby.setReady("Ana", false);
     lobby.chooseSeat("Ana", Team::BLUE, Role::GUESSER);
 
+    // somebody who joins or leaves cancels everybody's ready, so nobody starts with players they did not agree to
+    lobby.setReady("Ana", true); lobby.setReady("Bia", true);
+    CHECK(lobby.canStart());                                                   // two players: a co-operative game
     lobby.join("Cris");
-    lobby.join("Dani");
-    CHECK(lobby.isFull() && rejects([&] { lobby.join("Eve"); }));              // only as many players as seats
-    CHECK(!lobby.canStart());
+    CHECK(!lobby.members()[0].ready && !lobby.members()[1].ready && !lobby.canStart());
+    CHECK(lobby.missing() == "Everybody needs to pick a team and a role.");
+    lobby.chooseSeat("Cris", Team::BLUE, Role::SPY);
+    for (string name : {"Ana", "Bia", "Cris"}) lobby.setReady(name, true);
+    CHECK(lobby.canStart() && lobby.missing().empty());
+    lobby.leave("Cris");
+    CHECK(!lobby.members()[0].ready && !lobby.canStart());
+
+    // four players or more: two teams, and each one needs a spy and a guesser
+    lobby.join("Cris"); lobby.join("Dani");
+    CHECK(lobby.missing() == "Everybody needs to pick a team and a role.");
+    lobby.chooseSeat("Ana", Team::BLUE, Role::GUESSER);
+    lobby.chooseSeat("Bia", Team::BLUE, Role::SPY);
     lobby.chooseSeat("Cris", Team::RED, Role::SPY);
+    lobby.chooseSeat("Dani", Team::RED, Role::SPY);
+    CHECK(lobby.missing() == "The Red team needs a guesser.");
     lobby.chooseSeat("Dani", Team::RED, Role::GUESSER);
-    CHECK(lobby.players().size() == 4 && lobby.openSlots().empty());
+    CHECK(lobby.missing().empty() && !lobby.cooperative());
     for (string name : {"Ana", "Bia", "Cris"}) lobby.setReady(name, true);
     CHECK(!lobby.canStart());                                                  // Dani is not ready yet
     CHECK(rejects([&] { Match match(lobby, characters()); }));
@@ -126,23 +145,197 @@ void testWaitingRoom() {
     lobby.setReady("Cris", true);
 
     Match match(lobby, characters());                                          // starts with the seats they picked
-    CHECK(match.players().size() == 4);
+    CHECK(match.players().size() == 4 && !match.isCooperative());
     CHECK(match.viewFor("Bia").size() == 25);
 
-    // Leaving frees the name and the seat; with unseated players it still cannot start
+    // Leaving frees the name; with unseated players it still cannot start
     Lobby other;
     other.join("A"); other.chooseSeat("A", Team::BLUE, Role::SPY); other.setReady("A", true);
     other.leave("A");
-    CHECK(other.members().empty() && other.isOpen(Team::BLUE, Role::SPY));
+    CHECK(other.members().empty());
     CHECK(rejects([&] { other.leave("A"); }));
     other.join("A");                                                           // the name is free again
     Lobby unseated;
     for (string name : {"a", "b", "c", "d"}) unseated.join(name);
-    CHECK(unseated.isFull() && !unseated.canStart());
+    CHECK(!unseated.canStart());
+
+    // each team needs both roles, however many players there are
+    Lobby oneSided = lobbyOf({{Team::BLUE, Role::SPY}, {Team::BLUE, Role::GUESSER}, {Team::BLUE, Role::GUESSER}, {Team::BLUE, Role::GUESSER}});
+    CHECK(!oneSided.canStart() && oneSided.missing() == "The Red team needs a spy.");
+    Lobby noGuesser = lobbyOf({{Team::BLUE, Role::SPY}, {Team::BLUE, Role::GUESSER}, {Team::RED, Role::SPY}, {Team::RED, Role::SPY}});
+    CHECK(!noGuesser.canStart() && noGuesser.missing() == "The Red team needs a guesser.");
+    Lobby uneven = lobbyOf({{Team::BLUE, Role::SPY}, {Team::BLUE, Role::GUESSER}, {Team::BLUE, Role::GUESSER}, {Team::RED, Role::SPY},
+                            {Team::RED, Role::GUESSER}, {Team::RED, Role::GUESSER}, {Team::RED, Role::SPY}});   // 3 against 4, two spies on red
+    CHECK(uneven.canStart() && !uneven.cooperative());
 
     // addPlayer (console): joins, sits and is ready in one step
     Lobby console = fullLobby();
     CHECK(console.canStart());
+}
+
+vector<int> cardsWithKey(const Match& match, const string& spy, CardKey key);
+
+void testCooperative() {
+    // fewer than 4 players: co-operative, from 2 players on
+    Lobby alone = lobbyOf({{Team::BLUE, Role::SPY}});
+    CHECK(alone.cooperative() && !alone.canStart() && alone.missing() == "At least 2 players are needed to start.");
+    CHECK(rejects([&] { Match match(alone, characters()); }));
+
+    for (int round = 0; round < 50; round++) {
+        // different roles: they are kept, and the team they picked does not matter
+        Lobby pair = lobbyOf({{Team::RED, Role::GUESSER}, {Team::RED, Role::SPY}});
+        CHECK(pair.canStart() && pair.cooperative());
+        Match match(pair, characters());
+        CHECK(match.isCooperative() && match.currentTeam() == Team::BLUE);
+        for (const Player& player : match.players()) CHECK(player.team == Team::BLUE);
+        CHECK(match.players()[0].role == Role::GUESSER && match.players()[1].role == Role::SPY);
+    }
+    int firstIsSpy = 0;
+    for (int round = 0; round < 200; round++) {
+        // both pick the same role: one of them, at random, takes the other
+        for (Role same : {Role::SPY, Role::GUESSER}) {
+            Lobby pair = lobbyOf({{Team::BLUE, same}, {Team::RED, same}});
+            Match match(pair, characters());
+            const vector<Player>& players = match.players();
+            CHECK(players[0].role != players[1].role);
+            if (same == Role::SPY && players[0].role == Role::SPY) firstIsSpy++;
+        }
+    }
+    CHECK(firstIsSpy > 40 && firstIsSpy < 160);                                  // about half of the 200 rounds
+
+    {   // three players: roles kept when both exist (two spies is fine), fixed at random when everybody picked the same
+        Lobby trio = lobbyOf({{Team::BLUE, Role::SPY}, {Team::RED, Role::SPY}, {Team::RED, Role::GUESSER}});
+        Match match(trio, characters());
+        CHECK(match.isCooperative() && match.players()[0].role == Role::SPY && match.players()[1].role == Role::SPY && match.players()[2].role == Role::GUESSER);
+        Lobby same = lobbyOf({{Team::BLUE, Role::GUESSER}, {Team::BLUE, Role::GUESSER}, {Team::RED, Role::GUESSER}});
+        Match fixed(same, characters());
+        int spies = 0;
+        for (const Player& player : fixed.players()) spies += player.isSpy();
+        CHECK(spies == 1);
+    }
+    {   // four players are never co-operative
+        Match match(fullLobby(), characters());
+        CHECK(!match.isCooperative());
+    }
+
+    {   // the game: the turn always comes back to BLUE; RED cards are wrong cards; all the BLUE cards win
+        Lobby pair = lobbyOf({{Team::BLUE, Role::SPY}, {Team::BLUE, Role::GUESSER}});      // p0 spies, p1 guesses
+        Match match(pair, characters());
+        CHECK(match.currentTeam() == Team::BLUE && !match.hasClue());
+        vector<int> red = cardsWithKey(match, "p0", CardKey::RED), beige = cardsWithKey(match, "p0", CardKey::BEIGE);
+        vector<int> blue = cardsWithKey(match, "p0", CardKey::BLUE), black = cardsWithKey(match, "p0", CardKey::BLACK);
+        CHECK(rejects([&] { match.giveClue("p1", "NOPE", 1); }));                         // only the spy gives clues
+        match.giveClue("p0", "FIRE", 3);
+        CHECK(match.guess("p1", red[0]) == CardKey::RED);                                 // wrong card: the turn ends...
+        CHECK(match.currentTeam() == Team::BLUE && !match.hasClue() && !match.isFinished());   // ...and it is BLUE's again
+        CHECK(match.pendingExtraTries(Team::BLUE) == 3 && match.remaining(Team::RED) == 7);
+        match.giveClue("p0", "WATER", 2);
+        CHECK(match.triesRemaining() == 5);                                                // the carry-over works
+        match.guess("p1", blue[0]);
+        match.endTurn("p1");
+        CHECK(match.currentTeam() == Team::BLUE && !match.hasClue() && match.pendingExtraTries(Team::BLUE) == 0);
+        match.giveClue("p0", "EARTH", 1);
+        match.guess("p1", beige[0]);
+        CHECK(match.currentTeam() == Team::BLUE && !match.hasClue());
+        // revealing every RED card does not win for RED
+        for (size_t i = 1; i < red.size(); i++) {
+            match.giveClue("p0", "AIR", 1);
+            match.guess("p1", red[i]);
+        }
+        CHECK(!match.isFinished() && match.remaining(Team::RED) == 0);
+        // finding the BLUE cards wins
+        for (size_t i = 1; i < blue.size(); i++) {
+            if (match.remaining(Team::BLUE) == 0) break;
+            if (!match.hasClue()) match.giveClue("p0", "SPACE", 1);
+            match.guess("p1", blue[i]);
+        }
+        CHECK(match.isFinished() && match.winner() == Team::BLUE && !match.wasForfeited());
+        (void)black;
+    }
+    {   // the black card loses
+        Lobby pair = lobbyOf({{Team::BLUE, Role::SPY}, {Team::BLUE, Role::GUESSER}});
+        Match match(pair, characters());
+        match.giveClue("p0", "FIRE", 1);
+        match.guess("p1", cardsWithKey(match, "p0", CardKey::BLACK)[0]);
+        CHECK(match.isFinished() && match.winner() == Team::RED);                         // RED stands for "they lost"
+    }
+    {   // time limits still work: when the time runs out the turn starts over for BLUE
+        typedef Match::Clock Clock;
+        Clock::time_point start = Clock::now();
+        Lobby pair = lobbyOf({{Team::BLUE, Role::SPY}, {Team::BLUE, Role::GUESSER}});
+        pair.chooseTimer(TimerPhase::CLUE, true, 30);
+        for (string name : {"p0", "p1"}) pair.setReady(name, true);
+        Match match(pair, characters(), start);
+        match.advanceClock(start + chrono::seconds(31));
+        CHECK(match.currentTeam() == Team::BLUE && !match.hasClue() && !match.isFinished());
+        CHECK(match.millisecondsLeft(start + chrono::seconds(31)) > 28000);                 // a new 30 seconds began at the 30th second
+    }
+    {   // forfeit: the other "team" (nobody) wins, so the players lose
+        Lobby pair = lobbyOf({{Team::BLUE, Role::SPY}, {Team::BLUE, Role::GUESSER}});
+        Match match(pair, characters());
+        match.forfeit("p1");
+        CHECK(match.isFinished() && match.wasForfeited() && match.forfeitedBy() == Team::BLUE && match.winner() == Team::RED);
+    }
+}
+
+void testBiggerTeams() {
+    // 7 players: blue has 1 spy and 2 guessers, red has 2 spies and 2 guessers
+    Lobby lobby = lobbyOf({{Team::BLUE, Role::SPY}, {Team::BLUE, Role::GUESSER}, {Team::BLUE, Role::GUESSER},
+                           {Team::RED, Role::SPY}, {Team::RED, Role::SPY}, {Team::RED, Role::GUESSER}, {Team::RED, Role::GUESSER}});
+    const string blueSpy = "p0", blueG1 = "p1", blueG2 = "p2", redSpy1 = "p3", redSpy2 = "p4", redG1 = "p5", redG2 = "p6";
+    for (int round = 0; round < 20; round++) {
+        Match match(lobby, characters());
+        CHECK(!match.isCooperative() && match.players().size() == 7);
+        bool blueTurn = match.currentTeam() == Team::BLUE;
+        string other = blueTurn ? redG1 : blueG1;
+        string spy = blueTurn ? blueSpy : redSpy2, otherSpy = blueTurn ? redSpy1 : blueSpy;
+        string g1 = blueTurn ? blueG1 : redG1, g2 = blueTurn ? blueG2 : redG2;
+        Team team = match.currentTeam();
+        CHECK(rejects([&] { match.giveClue(otherSpy, "NOPE", 1); }));                    // the other team's spy
+        CHECK(rejects([&] { match.guess(g1, 0); }));                                      // no clue yet
+        match.giveClue(spy, "TEAM", 3);                                                   // any spy of the team can give the clue
+        CHECK(rejects([&] { match.giveClue(spy, "TWICE", 1); }));
+        CHECK(rejects([&] { match.guess(other, 0); }));
+        vector<int> mine = cardsWithKey(match, spy, keyOf(team));
+        match.guess(g1, mine[0]);                                                         // one guesser guesses...
+        match.guess(g2, mine[1]);                                                         // ...and the other one goes on
+        CHECK(match.currentClue().found == 2 && match.triesRemaining() == 1);
+        match.endTurn(g2);                                                                // either can end the turn
+        CHECK(match.currentTeam() == otherThan(team));
+        // every spy sees the colours, every guesser sees beige for the cards that were not revealed (2 were)
+        for (string name : {blueSpy, redSpy1, redSpy2}) CHECK(cardsWithKey(match, name, CardKey::BEIGE).size() == 8);
+        for (string name : {blueG1, blueG2, redG1, redG2}) CHECK(cardsWithKey(match, name, CardKey::BEIGE).size() == 23);
+    }
+}
+
+void testLeavingAMatch() {
+    // a team goes on when a player leaves, unless it has no spy or no guesser left
+    Lobby lobby = lobbyOf({{Team::BLUE, Role::SPY}, {Team::BLUE, Role::GUESSER}, {Team::BLUE, Role::GUESSER},
+                           {Team::RED, Role::SPY}, {Team::RED, Role::GUESSER}});
+    Match match(lobby, characters());
+    CHECK(!match.leavingForfeits("p1") && !match.leavingForfeits("p2"));        // blue has two guessers
+    CHECK(match.leavingForfeits("p0") && match.leavingForfeits("p3") && match.leavingForfeits("p4"));
+    match.playerLeft("p1");
+    CHECK(!match.isFinished());
+    CHECK(match.leavingForfeits("p2"));                                          // now it is the only guesser
+    match.playerLeft("p2");
+    CHECK(match.isFinished() && match.wasForfeited() && match.forfeitedBy() == Team::BLUE && match.winner() == Team::RED);
+    match.playerLeft("p3");                                                      // after the end nothing changes
+    CHECK(match.forfeitedBy() == Team::BLUE);
+    CHECK(!match.leavingForfeits("p3"));
+
+    // in a co-operative game everybody is in the same team
+    Lobby pair = lobbyOf({{Team::BLUE, Role::SPY}, {Team::BLUE, Role::GUESSER}});
+    Match coop(pair, characters());
+    CHECK(coop.leavingForfeits("p0") && coop.leavingForfeits("p1"));
+    coop.playerLeft("p0");
+    CHECK(coop.isFinished() && coop.forfeitedBy() == Team::BLUE);
+    Lobby trio = lobbyOf({{Team::BLUE, Role::SPY}, {Team::BLUE, Role::SPY}, {Team::BLUE, Role::GUESSER}});
+    Match coopTrio(trio, characters());
+    CHECK(!coopTrio.leavingForfeits("p0") && coopTrio.leavingForfeits("p2"));
+    coopTrio.playerLeft("p0");
+    CHECK(!coopTrio.isFinished());
+    CHECK(coopTrio.leavingForfeits("p1"));                                       // the last spy
 }
 
 void testUniverses() {
@@ -568,7 +761,9 @@ void testRoom() {
 
     // the waiting room rules, through the room
     room.chooseSeat(ana, Team::BLUE, Role::SPY);
-    CHECK(rejects([&] { room.chooseSeat(bia, Team::BLUE, Role::SPY); }));    // taken
+    room.chooseSeat(bia, Team::BLUE, Role::SPY);                             // the same seat as Ana: they are not limited
+    room.leave(bia);
+    bia = room.join("Bia");
     CHECK(rejects([&] { room.setReady(bia, true); }));                       // no seat yet
     room.setUniverse(bia, M_Universe::MCU, false);                           // 30 FOX characters are left: enough
     CHECK(room.waitingRoom().universes().size() == 1 && room.waitingRoom().universes().count(M_Universe::FOX_XMEN));
@@ -584,7 +779,7 @@ void testRoom() {
     CHECK(throwsType<NotInRoom>([&] { room.setTimer("nope", TimerPhase::GUESS, true, 30); }));
     CHECK(throwsType<WrongStage>([&] { room.match(); }));                    // no match yet
 
-    // leaving before the start: the name and seat are free again
+    // leaving before the start: the name is free again
     room.leave(bia);
     CHECK(throwsType<NotInRoom>([&] { room.member(bia); }) && !room.isEmpty());
     string bia2 = room.join("Bia");
@@ -622,7 +817,53 @@ void testRoomMatch() {
         for (string name : {"bs", "bg", "rs", "rg"}) room.setReady(t[name], true);
         for (const CardView& card : room.match().viewFor("bs")) CHECK(card.characterName[0] == 'X');
     }
-    {   // leaving in the middle of a match makes the team forfeit; the other players stay
+    {   // two players: a co-operative game, and the seats show the roles they were given
+        Room room("ROOM4", catalog);
+        string ana = room.join("Ana"), bia = room.join("Bia");
+        room.chooseSeat(ana, Team::RED, Role::SPY);
+        room.chooseSeat(bia, Team::RED, Role::GUESSER);
+        room.setReady(ana, true);
+        CHECK(!room.started());
+        room.setReady(bia, true);
+        CHECK(room.started() && room.match().isCooperative() && room.waitingRoom().cooperative());
+        CHECK(*room.member(ana).seat == Slot(Team::BLUE, Role::SPY) && *room.member(bia).seat == Slot(Team::BLUE, Role::GUESSER));
+        CHECK(room.match().currentTeam() == Team::BLUE);
+        room.leave(bia);                                                     // the team cannot go on without a guesser
+        CHECK(room.match().isFinished() && room.match().wasForfeited());
+        room.leave(ana);
+        CHECK(room.isEmpty());
+    }
+    {   // joining the waiting room cancels everybody's ready, so the match does not start behind a newcomer's back
+        Room room("ROOM5", catalog);
+        string ana = room.join("Ana");
+        room.chooseSeat(ana, Team::BLUE, Role::SPY);
+        room.setReady(ana, true);
+        string bia = room.join("Bia");
+        CHECK(!room.member(ana).ready && !room.started());
+        room.chooseSeat(bia, Team::BLUE, Role::GUESSER);
+        room.setReady(bia, true); room.setReady(ana, true);
+        CHECK(room.started());
+    }
+    {   // a bigger game: a team goes on when a player leaves, unless that leaves it without a spy or a guesser
+        Room room("ROOM6", catalog);
+        map<string, string> t;
+        const char* names[5] = {"bs", "bg", "bg2", "rs", "rg"};
+        Team teams[5] = {Team::BLUE, Team::BLUE, Team::BLUE, Team::RED, Team::RED};
+        Role roles[5] = {Role::SPY, Role::GUESSER, Role::GUESSER, Role::SPY, Role::GUESSER};
+        for (int i = 0; i < 5; i++) { t[names[i]] = room.join(names[i]); room.chooseSeat(t[names[i]], teams[i], roles[i]); }
+        for (int i = 0; i < 5; i++) room.setReady(t[names[i]], true);
+        CHECK(room.started() && !room.match().isCooperative());
+        room.leave(t["bg"]);
+        CHECK(!room.match().isFinished());
+        Match& match = room.match();
+        Team team = match.currentTeam();
+        string spy = team == Team::BLUE ? "bs" : "rs", guesser = team == Team::BLUE ? "bg2" : "rg";
+        match.giveClue(spy, "STILL HERE", 1);
+        CHECK(match.guess(guesser, cardsWithKey(match, spy, keyOf(team))[0]) == keyOf(team));
+        room.leave(t["bg2"]);                                                // the last blue guesser
+        CHECK(match.isFinished() && match.forfeitedBy() == Team::BLUE);
+    }
+    {   // leaving in the middle of a match makes the team forfeit when it cannot go on; the other players stay
         Room room("ROOM3", catalog);
         map<string, string> t = fillRoom(room);
         room.leave(t["rs"]);
@@ -666,12 +907,12 @@ void testRoomRegistry() {
         for (int i = 0; i < 1000; i++) seen.insert(rooms.create("p").room->code());
         CHECK(seen.size() == 1000 && rooms.size() == 1000);
     }
-    {   // a full room, and a room that already started
+    {   // a full room
         RoomRegistry rooms(catalog);
         RoomRegistry::Entry host = rooms.create("p0");
         const string code = host.room->code();
-        for (int i = 1; i < 4; i++) rooms.join(code, "p" + to_string(i));
-        CHECK(rejects([&] { rooms.join(code, "p4"); }));                     // 4 seats, 4 players
+        for (int i = 1; i < Lobby::maxPlayers; i++) rooms.join(code, "p" + to_string(i));
+        CHECK(rejects([&] { rooms.join(code, "one more"); }));               // 10 players at most
         CHECK(rooms.roomOf(host.token).waitingRoom().isFull());
     }
     {   // rooms are separate: players, boards and turns never mix
@@ -987,6 +1228,9 @@ void run(const char* name, void (*group)()) {
 int main() {
     run("enums", testEnums);
     run("lobby", testLobby);
+    run("cooperative", testCooperative);
+    run("bigger teams", testBiggerTeams);
+    run("leaving a match", testLeavingAMatch);
     run("waiting room", testWaitingRoom);
     run("universes", testUniverses);
     run("timer", testTimer);

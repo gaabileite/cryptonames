@@ -1,5 +1,7 @@
 // Front-end of CryptoNames. Talks to the JSON API of the server (see src/server/server.cpp).
 // Three screens: join (just a name), wait (pick a team and a role, then press ready) and game (board + end-turn button).
+// A game has from 2 to 10 players, and any number of them can share a team and a role. With fewer than 4 players the
+// game is co-operative: everybody is on the Blue team (the server decides the roles) and an alert says so.
 // The page asks the server for the state every POLL_MS; everything the player sees comes from the server.
 (() => {
     'use strict';
@@ -19,14 +21,14 @@
     // ---------- Token (kept so a page refresh does not lose the seat) ----------
 
     const storage = {
-        get() { try { return localStorage.getItem('token'); } catch (e) { return null; } },
-        set(value) {
+        get(key) { try { return localStorage.getItem(key); } catch (e) { return null; } },
+        set(key, value) {
             try {
-                if (value) localStorage.setItem('token', value); else localStorage.removeItem('token');
+                if (value) localStorage.setItem(key, value); else localStorage.removeItem(key);
             } catch (e) { /* storage blocked: the seat just will not survive a refresh */ }
         },
     };
-    let token = storage.get();
+    let token = storage.get('token');
 
     // ---------- API ----------
 
@@ -128,7 +130,7 @@
 
     function forgetSeat() {
         token = null;
-        storage.set(null);
+        storage.set('token', null);
         $('whoami').hidden = true;
         setRoomBadge(null);
         resetRendering();
@@ -153,7 +155,7 @@
         try {
             const entered = await api('POST', path, body);
             token = entered.token;
-            storage.set(token);
+            storage.set('token', token);
             resetRendering();
             await refreshPlay();
         } catch (error) {
@@ -193,7 +195,8 @@
 
     // ---------- Waiting room: pick a team and a role, then press ready ----------
 
-    const slots = {};     // 'BLUE|SPY' -> { button, who, badge }
+    const slots = {};     // 'BLUE|SPY' -> { button, who }
+    const teamCards = {}; // 'BLUE' -> { card, title }
     (function buildTeams() {
         for (const team of TEAMS) {
             const card = document.createElement('div');
@@ -201,6 +204,7 @@
             const title = document.createElement('h3');
             title.textContent = `${NAMES[team]} team`;
             card.append(title);
+            teamCards[team] = { card, title };
             for (const role of ROLES) {
                 const button = document.createElement('button');
                 button.type = 'button';
@@ -212,11 +216,9 @@
                 roleName.textContent = NAMES[role];
                 const who = document.createElement('span');
                 who.className = 'who';
-                const badge = document.createElement('span');
-                badge.className = 'badge';
-                button.append(roleName, who, badge);
+                button.append(roleName, who);
                 card.append(button);
-                slots[`${team}|${role}`] = { button, who, badge };
+                slots[`${team}|${role}`] = { button, who };
             }
             $('teams').append(card);
         }
@@ -380,35 +382,46 @@
         if (!changed('wait', { lobby, you })) return;
 
         const players = lobby.players;
-        const total = lobby.totalSeats;
+        const total = players.length;
         const ready = players.filter((player) => player.ready).length;
         const unseated = players.filter((player) => !player.team);
+        const coop = lobby.cooperative;
 
-        // Who sits where
-        const occupant = {};
+        // Who sits where: any number of players can take the same seat. In a co-operative game everybody is on the
+        // Blue team, so the team they picked does not matter and only the roles are shown.
+        const occupants = {};
         for (const player of players) {
-            if (player.team) occupant[`${player.team}|${player.role}`] = player;
+            if (!player.team) continue;
+            const key = `${coop ? 'BLUE' : player.team}|${player.role}`;
+            (occupants[key] = occupants[key] || []).push(player);
         }
+        teamCards.RED.card.hidden = coop;
+        teamCards.BLUE.title.textContent = coop ? 'Co-operative team' : `${NAMES.BLUE} team`;
         for (const key of Object.keys(slots)) {
-            const { button, who, badge } = slots[key];
-            const player = occupant[key];
-            const mine = !!player && player.name === you.name;
+            const { button, who } = slots[key];
+            const here = occupants[key] || [];
+            const mine = here.some((player) => player.name === you.name);
             button.classList.toggle('mine', mine);
-            button.classList.toggle('taken', !!player && !mine);
             button.setAttribute('aria-pressed', mine ? 'true' : 'false');
-            who.textContent = player ? (mine ? `${player.name} (you)` : player.name) : 'Open';
-            badge.textContent = player && player.ready ? '✓ Ready' : '';
-            // Taken by someone else, or locked because I am ready
-            button.disabled = (!!player && !mine) || you.ready;
+            who.textContent = here.length === 0 ? 'Nobody yet'
+                : here.map((player) => `${player.name}${player.name === you.name ? ' (you)' : ''}${player.ready ? ' ✓' : ''}`).join(', ');
+            button.disabled = you.ready;          // locked while I am ready
         }
 
         // Status line
         let status;
-        if (players.length < total) status = `${players.length} of ${total} players have joined. Waiting for ${total - players.length} more.`;
-        else if (unseated.length > 0) status = 'Everybody needs to pick a team and a role.';
+        if (total < lobby.minPlayers) status = `${total} of at least ${lobby.minPlayers} players have joined. Waiting for ${lobby.minPlayers - total} more.`;
+        else if (lobby.missing) status = lobby.missing;
         else if (ready < total) status = `${ready} of ${total} players are ready. The game starts when everyone is ready.`;
         else status = 'Everyone is ready. Starting...';
         $('wait-count').textContent = status;
+
+        $('coop-note').hidden = !coop;
+        $('coop-note').textContent = `With fewer than ${lobby.teamGameMinPlayers} players this is a co-operative game: everybody plays on the Blue team and only the role you pick counts. `
+            + 'If everybody picks the same role, one player is chosen at random to take the other.';
+        $('players-note').textContent = `A game takes from ${lobby.minPlayers} to ${lobby.maxPlayers} players, and any number of them can share a team and a role. `
+            + `With ${lobby.teamGameMinPlayers} or more, Blue plays against Red and each team needs a spy and a guesser. `
+            + "When a player joins or leaves, everybody's ready is cancelled.";
 
         $('wait-unseated').hidden = unseated.length === 0;
         $('wait-unseated').textContent = `Still choosing a team: ${unseated.map((player) => player.name).join(', ')}`;
@@ -595,6 +608,27 @@
     }
     setInterval(paintTimer, 250);
 
+    // ---------- The co-operative game alert ----------
+
+    // Shown once per player, when a game with only 2 or 3 players begins.
+    const NUMBER_WORDS = { 2: 'two', 3: 'three' };
+    function showCoopAlert(state) {
+        if (!state.cooperative || storage.get('coopSeen') === token || !$('coop-alert').hidden) return;
+        const count = state.playerCount;
+        $('coop-text').textContent = `Your game only contains ${NUMBER_WORDS[count] || count} people. This will be a co-operative game.`;
+        $('coop-detail').textContent = `Everybody plays on the Blue team, and you are ${state.you.role === 'SPY' ? 'a spy: you see every colour and give the clues' : 'a guesser: you pick the cards'}. `
+            + 'Find all the Blue cards together. A Red or beige card ends the turn, and the black card loses the game.';
+        $('coop-alert').hidden = false;
+        $('coop-ok').focus();
+    }
+
+    function closeCoopAlert() {
+        storage.set('coopSeen', token);
+        $('coop-alert').hidden = true;
+    }
+
+    $('coop-ok').addEventListener('click', closeCoopAlert);
+
     // ---------- Clues ----------
 
     function plural(count, word) {
@@ -689,6 +723,9 @@
         show('game');
         document.title = state.canGuess || state.canGiveClue ? `Your turn - ${BASE_TITLE}` : BASE_TITLE;
         updateTimer(state.timer, state.finished);
+        leavingForfeits = state.leavingForfeits;
+        cooperative = state.cooperative;
+        showCoopAlert(state);
         const { timer, ...stable } = state;       // the time left changes with every poll, which must not redraw the board
         if (!changed('game', { state: stable, board })) return;
 
@@ -699,17 +736,26 @@
 
         // Banner
         const banner = $('banner');
-        if (state.finished) {
+        if (state.finished && state.cooperative) {
+            // there is no other team: the Blue team either finds every card (and wins) or loses
+            const won = state.winner === 'BLUE';
+            banner.className = `banner team-${won ? 'BLUE' : 'RED'}`;
+            banner.textContent = won ? 'You found every Blue card. You win!' : (state.forfeitedBy ? 'Your team forfeited. You lose.' : 'That was the black card. You lose.');
+        } else if (state.finished) {
             banner.className = `banner team-${state.winner}`;
             banner.textContent = state.forfeitedBy
                 ? `Team ${NAMES[state.forfeitedBy]} forfeited. Team ${NAMES[state.winner]} wins!`
                 : `Team ${NAMES[state.winner]} wins!`;
+        } else if (state.cooperative) {
+            banner.className = 'banner team-BLUE';
+            banner.textContent = 'Co-operative game: find all the Blue cards';
         } else {
             banner.className = `banner team-${state.currentTeam}`;
             banner.textContent = `Team ${NAMES[state.currentTeam]}'s turn`;
         }
         $('score-BLUE').textContent = `Blue: ${state.remaining.BLUE} left`;
         $('score-RED').textContent = `Red: ${state.remaining.RED} left`;
+        $('score-RED').hidden = state.cooperative;
 
         // Hint
         let hint;
@@ -755,6 +801,8 @@
     // Leaving a match that is still going on makes the team forfeit, so the confirmation says so.
     let asking = null;                // null, 'forfeit' or 'leave'
     let gameFinished = false;
+    let leavingForfeits = true;       // would my team have to give up if I left? (the server knows: others may take my place)
+    let cooperative = false;
     let askedFrom = null;             // the button that opened the question, to give the focus back to it
     function renderActions(finished) {
         gameFinished = finished;
@@ -775,7 +823,7 @@
             const result = await api('POST', '/api/guess', { index: Number(button.dataset.index) });
             if (result.key === 'BLACK') toast('That was the black card. Your team loses.', true);
             else if (result.key === myTeam) toast(`Correct! That was a ${NAMES[result.key]} card.`);
-            else toast(`That was a ${NAMES[result.key]} card. The turn passes.`, true);
+            else toast(`That was a ${NAMES[result.key]} card. ${cooperative ? 'Your spy gives a new clue.' : 'The turn passes.'}`, true);
         } catch (error) {
             toast(error.message, true);
         } finally {
@@ -803,10 +851,12 @@
         askedFrom = from;
         if (mode === 'forfeit') {
             const other = myTeam === 'BLUE' ? 'Red' : 'Blue';
-            $('confirm-question').textContent = `Give up and let Team ${other} win?`;
+            $('confirm-question').textContent = cooperative ? 'Give up and lose the game?' : `Give up and let Team ${other} win?`;
             $('confirm-yes').textContent = 'Yes, forfeit';
         } else if (mode === 'leave') {
-            $('confirm-question').textContent = 'Leaving the room makes your team forfeit. Leave anyway?';
+            $('confirm-question').textContent = leavingForfeits
+                ? 'Leaving the room makes your team forfeit, because it would have no spy or no guesser left. Leave anyway?'
+                : 'Leave the room? Your team keeps playing without you.';
             $('confirm-yes').textContent = 'Yes, leave';
         }
         renderActions(gameFinished);
@@ -861,7 +911,8 @@
     $('confirm-no').addEventListener('click', stopAsking);
     $('confirm-yes').addEventListener('click', () => (asking === 'leave' ? leaveTheRoom() : forfeit()));
     document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && asking) stopAsking();
+        if (event.key === 'Escape' && !$('coop-alert').hidden) closeCoopAlert();
+        else if (event.key === 'Escape' && asking) stopAsking();
     });
 
     // ---------- Refresh loop ----------

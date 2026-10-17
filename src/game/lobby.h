@@ -31,34 +31,36 @@ struct Member {
 };
 
 // First step of the game: the waiting room. No input/output here, so any interface (console, web, ...) can drive it.
-//   join(name)                 -> enter the waiting room, without a seat yet
+//   join(name)                 -> enter the waiting room, without a seat yet (cancels everybody's ready)
+//   leave(name)                -> leave it (cancels everybody's ready)
 //   chooseSeat(name, team, role) -> pick or change the seat (not while ready)
 //   setReady(name, ready)      -> (un)mark yourself as ready; needs a seat
 //   chooseUniverses(set)       -> which universes the characters of the match come from (cancels everybody's ready)
 //   chooseTimer(phase, on, seconds) -> whether the clue / the guessing has a time limit, and how long (cancels everybody's ready)
-//   canStart()                 -> every seat is taken and everybody is ready: the match can begin
+//   missing()                  -> what the players still have to fix before a match could start ("" when nothing)
+//   canStart()                 -> nothing is missing and everybody is ready: the match can begin
 // Anything not allowed throws invalid_argument with a message that can be shown to the player.
-// The default rules are 1 SPY and 1 GUESSER per team (4 players); raise the numbers for bigger games.
+// From 2 to 10 players, and any number of them on each seat: a seat is just a team and a role. With 4 or more players
+// the game is BLUE against RED, and each team needs at least one SPY and one GUESSER. With 2 or 3 players the game is
+// co-operative (see Match): everybody is on the BLUE team and only the roles matter.
 class Lobby {
     private:
-        int spiesPerTeam;
-        int guessersPerTeam;
         vector<Member> joined;
         set<M_Universe> chosen;          // the universes the match draws its characters from
         TimeLimit clueLimit;             // both off until somebody turns them on
         TimeLimit guessLimit;
 
-        int seatsFor(Role role) const {
-            return role == Role::SPY ? spiesPerTeam : guessersPerTeam;
-        }
-
-        // Seats of this kind taken by players other than `except`.
-        int takenSeats(Team team, Role role, const string& except = "") const {
+        // Players with this seat (team and role).
+        int seated(Team team, Role role) const {
             int count = 0;
             for (const Member& member : joined) {
-                if (member.name != except && member.seat && *member.seat == Slot(team, role)) count++;
+                if (member.seat && *member.seat == Slot(team, role)) count++;
             }
             return count;
+        }
+
+        void cancelEveryonesReady() {
+            for (Member& member : joined) member.ready = false;
         }
 
         Member& find(const string& name) {
@@ -84,7 +86,7 @@ class Lobby {
                 }
             }
             if (isFull()) {
-                throw invalid_argument("The waiting room is full");
+                throw invalid_argument("The waiting room is full: a game has at most " + to_string(maxPlayers) + " players");
             }
             return name;
         }
@@ -93,50 +95,39 @@ class Lobby {
         static constexpr size_t maxNameLength = 30;
         static constexpr int minTurnSeconds = 15;
         static constexpr int maxTurnSeconds = 600;
+        static constexpr int minPlayers = 2;
+        static constexpr int maxPlayers = 10;
+        static constexpr int teamGameMinPlayers = 4;   // with fewer players the game is co-operative
 
-        Lobby(int spiesPerTeam = 1, int guessersPerTeam = 1) {
-            this->spiesPerTeam = spiesPerTeam;
-            this->guessersPerTeam = guessersPerTeam;
+        Lobby() {
             guessLimit.seconds = 90;                 // guessing usually takes longer than a clue
             chosen = {M_Universe::MCU, M_Universe::FOX_XMEN, M_Universe::FANTASTIC_FOUR, M_Universe::COMICS,
                       M_Universe::VENOM, M_Universe::SONY_SPIDERMAN, M_Universe::THROUGH_THE_SPIDERVERSE};   // all of them, until someone picks
         }
 
-        int totalSeats() const {
-            return 2 * (spiesPerTeam + guessersPerTeam);
+        // Fewer than 4 players: everybody plays on the same team, against the cards instead of against another team.
+        bool cooperative() const {
+            return (int)joined.size() < teamGameMinPlayers;
         }
 
-        // Is there a seat of this kind that nobody has taken?
-        bool isOpen(Team team, Role role) const {
-            return takenSeats(team, role) < seatsFor(role);
-        }
-
-        // Every (team, role) that still has a free seat. A seat that exists twice shows up twice.
-        vector<Slot> openSlots() const {
-            vector<Slot> slots;
-            for (Team team : {Team::BLUE, Team::RED}) {
-                for (Role role : {Role::SPY, Role::GUESSER}) {
-                    int free = seatsFor(role) - takenSeats(team, role);
-                    for (int i = 0; i < free; i++) slots.push_back(Slot(team, role));
-                }
-            }
-            return slots;
-        }
-
-        // Enters the waiting room. The name is stored without the spaces around it.
+        // Enters the waiting room. The name is stored without the spaces around it. A new player changes who is going
+        // to play, so everybody's ready is cancelled.
         void join(string name) {
-            joined.push_back(Member{checkNewName(name), nullopt, false});
+            string clean = checkNewName(name);
+            cancelEveryonesReady();
+            joined.push_back(Member{clean, nullopt, false});
         }
 
-        // Leaves the waiting room, freeing the name and the seat.
+        // Leaves the waiting room, freeing the name and the seat. The others are no longer ready, for the same reason.
         void leave(const string& name) {
             find(name);                      // throws if there is nobody with this name
             for (size_t i = 0; i < joined.size(); i++) {
                 if (joined[i].name == name) {
                     joined.erase(joined.begin() + i);
-                    return;
+                    break;
                 }
             }
+            cancelEveryonesReady();
         }
 
         // Picks a seat, or changes to another one. Not allowed while ready: cancel the ready first.
@@ -145,10 +136,26 @@ class Lobby {
             if (member.ready) {
                 throw invalid_argument("Cancel your ready before changing team or role");
             }
-            if (takenSeats(team, role, name) >= seatsFor(role)) {
-                throw invalid_argument("No " + toString(role) + " seat left on team " + toString(team));
-            }
             member.seat = Slot(team, role);
+        }
+
+        // What is in the way of a match with these players, as a message for them; "" when nothing is.
+        // Being ready is not part of it: see canStart().
+        string missing() const {
+            if ((int)joined.size() < minPlayers) {
+                return "At least " + to_string(minPlayers) + " players are needed to start.";
+            }
+            for (const Member& member : joined) {
+                if (!member.seat) return "Everybody needs to pick a team and a role.";
+            }
+            if (!cooperative()) {
+                for (Team team : {Team::BLUE, Team::RED}) {
+                    string name = team == Team::BLUE ? "Blue" : "Red";
+                    if (seated(team, Role::SPY) == 0) return "The " + name + " team needs a spy.";
+                    if (seated(team, Role::GUESSER) == 0) return "The " + name + " team needs a guesser.";
+                }
+            }
+            return "";
         }
 
         void setReady(const string& name, bool ready) {
@@ -168,7 +175,7 @@ class Lobby {
             }
             if (universes == chosen) return;
             chosen = universes;
-            for (Member& member : joined) member.ready = false;
+            cancelEveryonesReady();
         }
 
         const set<M_Universe>& universes() const {
@@ -186,7 +193,7 @@ class Lobby {
             if (enabled == limit.enabled && seconds == limit.seconds) return;
             limit.enabled = enabled;
             limit.seconds = seconds;
-            for (Member& member : joined) member.ready = false;
+            cancelEveryonesReady();
         }
 
         const TimeLimit& timer(TimerPhase phase) const {
@@ -196,9 +203,6 @@ class Lobby {
         // Joins, picks the seat and is ready, all at once (for the console, where there is no waiting room).
         void addPlayer(string name, Team team, Role role) {
             name = checkNewName(name);
-            if (!isOpen(team, role)) {
-                throw invalid_argument("No " + toString(role) + " seat left on team " + toString(team));
-            }
             joined.push_back(Member{name, Slot(team, role), true});
         }
 
@@ -209,16 +213,24 @@ class Lobby {
 
         // Nobody else can enter the waiting room.
         bool isFull() const {
-            return (int)joined.size() >= totalSeats();
+            return (int)joined.size() >= maxPlayers;
         }
 
-        // Every seat is taken and everybody is ready.
+        // Nothing is missing (see missing()) and everybody is ready.
         bool canStart() const {
-            if (!isFull()) return false;
+            if (!missing().empty()) return false;
             for (const Member& member : joined) {
-                if (!member.seat || !member.ready) return false;
+                if (!member.ready) return false;
             }
             return true;
+        }
+
+        // The match gave everybody their final team and role (it decides them itself in a co-operative game): the
+        // seats of the waiting room show them from now on.
+        void reseat(const vector<Player>& assigned) {
+            for (const Player& player : assigned) {
+                find(player.name).seat = Slot(player.team, player.role);
+            }
         }
 
         const vector<Member>& members() const {

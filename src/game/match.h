@@ -3,6 +3,7 @@
 #include <vector>
 #include <stdexcept>
 #include <chrono>
+#include <set>
 #include "lobby.h"
 #include "grid.h"
 #include "clue.h"
@@ -23,16 +24,22 @@ struct CardView {
 //   guess(name, index)    -> the current team's GUESSER reveals a card (after the clue; one try each)
 //   endTurn(name)         -> the current team's GUESSER stops guessing
 //   forfeit(name)         -> a team gives up: any of its players, at any time, and the other team wins
+//   playerLeft(name)      -> a player left the room: their team goes on, unless it is left without a spy or a guesser
 //   advanceClock()        -> with a time limit, passes the turn when the time of a turn has run out
 // Anything not allowed throws invalid_argument with a message that can be shown to the player.
 //
 // Rules: the teams alternate. A turn starts with the SPY's clue, and the GUESSER can only guess after it.
+// A team can have several SPYs and several GUESSERs: any SPY of the team on turn gives the clue, any GUESSER guesses.
 // The clue number is how many tries the GUESSER has. A try that finds a card of their own team is a good one and the
 // GUESSER keeps going until the tries run out. A card of the other team or a BEIGE card ends the turn at once, and
 // the tries that were left for the clue (the clue number minus the good tries) are added to the next clue of that
 // team. Ending the turn on purpose, or running out of time, gives no extra tries.
 // The BLACK card loses the game on the spot.
 // The first team to reveal all of its cards wins.
+// With fewer than 4 players the game is co-operative: everybody is on the BLUE team (the lobby's choice of team does
+// not matter, and the roles they picked are kept, unless everybody picked the same one: then one player, at random,
+// takes the other role). There is no RED team, so after every turn it is BLUE's turn again; a RED card is a wrong
+// card like a BEIGE one, and the team wins by finding all the BLUE cards. The BLACK card still loses.
 // There can be two time limits (chosen in the waiting room): one for the SPY to give the clue, counted from the moment
 // the turn begins, and one for the GUESSER, counted from the moment the clue is given; guessing right does not give more
 // time. When the time of a phase runs out the turn passes to the other team. Nothing runs by itself: whoever drives the
@@ -52,6 +59,8 @@ class Match {
         Clock::time_point phaseStartedAt; // when the turn began, or when the clue was given
         bool forfeited;
         Team forfeitingTeam;
+        bool coop;                        // co-operative game: everybody is on the BLUE team
+        set<string> departed;             // players who left the room during the match
         vector<Clue> clues;               // every clue of the match, oldest first
         bool clueGiven;                   // has the SPY of the team on turn given the clue of this turn?
         int triesLeft;                    // tries left for the clue of this turn
@@ -88,6 +97,31 @@ class Match {
             return player;
         }
 
+        // Everybody on BLUE, with the roles they picked. If those are all the same, one player picked at random takes the other.
+        static vector<Player> cooperativeLineup(vector<Player> players) {
+            bool anySpy = false, anyGuesser = false;
+            for (Player& player : players) {
+                player.team = Team::BLUE;
+                (player.isSpy() ? anySpy : anyGuesser) = true;
+            }
+            if (!anySpy || !anyGuesser) {
+                uniform_int_distribution<size_t> pick(0, players.size() - 1);
+                Player& switched = players[pick(rng())];
+                switched.role = anySpy ? Role::GUESSER : Role::SPY;
+            }
+            return players;
+        }
+
+        // Does the team of this player still have a spy and a guesser if they are not there?
+        bool teamKeepsPlaying(const Player& leaving) const {
+            bool spy = false, guesser = false;
+            for (const Player& player : participants) {
+                if (player.name == leaving.name || departed.count(player.name) || player.team != leaving.team) continue;
+                (player.isSpy() ? spy : guesser) = true;
+            }
+            return spy && guesser;
+        }
+
         // Only the characters of the universes the lobby chose.
         static vector<Character> allowedCharacters(const Lobby& lobby, const vector<Character>& pool) {
             vector<Character> allowed;
@@ -105,9 +139,9 @@ class Match {
             goodTries = 0;
         }
 
-        // The turn goes to the other team and its time starts over.
+        // The turn goes to the other team and its time starts over. In a co-operative game there is no other team.
         void passTurn(Clock::time_point now) {
-            turn = opposite(turn);
+            if (!coop) turn = opposite(turn);
             startTurn(now);
         }
 
@@ -121,15 +155,16 @@ class Match {
         // only from the universes the lobby chose, and throws if those have fewer than 25 characters.
         Match(const Lobby& lobby, const vector<Character>& pool, Clock::time_point now = Clock::now()) : grid(allowedCharacters(lobby, pool)) {
             if (!lobby.canStart()) {
-                throw invalid_argument("The match cannot start before every seat is taken and everybody is ready");
+                throw invalid_argument("The match cannot start before the players are seated and everybody is ready");
             }
-            participants = lobby.players();
+            coop = lobby.cooperative();
+            participants = coop ? cooperativeLineup(lobby.players()) : lobby.players();
 
             grid.assignCharacters();
             grid.assignKeyCards();
 
             uniform_int_distribution<int> coin(0, 1);
-            turn = coin(rng()) == 0 ? Team::BLUE : Team::RED;
+            turn = coop || coin(rng()) == 0 ? Team::BLUE : Team::RED;
             matchState = MatchState::IN_PROGRESS;
             winningTeam = turn;
             clueSeconds = lobby.timer(TimerPhase::CLUE).enabled ? lobby.timer(TimerPhase::CLUE).seconds : 0;
@@ -140,8 +175,14 @@ class Match {
             forfeitingTeam = turn;
         }
 
+        // Everybody who started the match, with the team and role they play (also those who left since).
         const vector<Player>& players() const {
             return participants;
+        }
+
+        // A co-operative game: everybody is on the BLUE team, and winner() is RED when they lose.
+        bool isCooperative() const {
+            return coop;
         }
 
         Team currentTeam() const {
@@ -313,7 +354,7 @@ class Match {
                 finish(other);
             } else if (remaining(player.team) == 0) {
                 finish(player.team);
-            } else if (remaining(other) == 0) {
+            } else if (!coop && remaining(other) == 0) {
                 finish(other);
             } else if (key != keyOf(player.team)) {
                 // A wrong card: the turn is over, and the tries that were not used well go to the next clue.
@@ -346,5 +387,20 @@ class Match {
             forfeited = true;
             forfeitingTeam = player.team;
             finish(opposite(player.team));
+        }
+
+        // Would the team of this player have to give up if they left now?
+        bool leavingForfeits(const string& name) const {
+            return !isFinished() && !teamKeepsPlaying(findPlayer(name));
+        }
+
+        // The player left the room. Their team goes on without them, unless it has no spy or no guesser left: then it
+        // forfeits, so nobody waits for a team that cannot play. Does nothing once the match is over.
+        void playerLeft(const string& name) {
+            if (isFinished()) return;
+            if (leavingForfeits(name)) {
+                forfeit(name);
+            }
+            departed.insert(name);
         }
 };

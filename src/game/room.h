@@ -56,7 +56,7 @@ class Room {
         string roomCode;
         const Catalog& catalog;
         Lobby lobby;
-        unique_ptr<Match> currentMatch;       // created when every seat is taken and everybody is ready
+        unique_ptr<Match> currentMatch;       // created when the players are ready and nothing is missing
         map<string, string> nameOfToken;      // the secret token of each player -> the player's name
         Clock::time_point lastActivity;
 
@@ -107,11 +107,12 @@ class Room {
             throw NotInRoom("Unknown or missing token. Join the game first");
         }
 
-        // Leaves the room, at any stage. Leaving a match that is still going on makes the player's team forfeit.
+        // Leaves the room, at any stage. Leaving a match that is still going on makes the player's team forfeit, unless it
+        // still has a spy and a guesser without them.
         void leave(const string& token) {
             string name = member(token).name;
-            if (currentMatch && !currentMatch->isFinished()) {
-                currentMatch->forfeit(name);
+            if (currentMatch) {
+                currentMatch->playerLeft(name);
             }
             lobby.leave(name);
             for (auto entry = nameOfToken.begin(); entry != nameOfToken.end();) {
@@ -131,12 +132,13 @@ class Room {
             lobby.chooseSeat(member(token).name, team, role);
         }
 
-        // Marks the player as ready, or not. The match starts by itself when every seat is taken and everybody is ready.
+        // Marks the player as ready, or not. The match starts by itself when everybody is ready and nothing is missing.
         void setReady(const string& token, bool ready) {
             requireWaitingRoom();
             lobby.setReady(member(token).name, ready);
             if (lobby.canStart()) {
                 currentMatch = make_unique<Match>(lobby, catalog.characters);
+                lobby.reseat(currentMatch->players());      // a co-operative game decides the teams and roles itself
             }
         }
 

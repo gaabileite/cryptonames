@@ -13,9 +13,11 @@
 //   POST /api/rooms/join    {"code", "name"} -> {"code", "token", ...}          404 if there is no such room
 // Waiting room (until every seat is taken and everybody is ready, then the match starts by itself):
 //   GET  /api/lobby      the room code, who is in the waiting room (team and role are null until picked, plus "ready"),
-//                        the open seats, the universes with their character count and whether they are selected,
-//                        and the time limits                                                (X-Token)
-//   POST /api/seat       {"team", "role"} picks or changes your seat; not while ready      (X-Token)
+//                        how many players a game takes (2 to 10), whether the game would be co-operative (fewer than 4
+//                        players), what is "missing" before a match could start (null when nothing), the universes
+//                        with their character count and whether they are selected, and the time limits   (X-Token)
+//   POST /api/seat       {"team", "role"} picks or changes your seat; any number of players can take the same one;
+//                        not while ready                                                   (X-Token)
 //   POST /api/universes  {"universe": "MCU", "selected": true|false} switches one universe on or off; cancels everybody's ready (X-Token)
 //   POST /api/timer      {"phase": "clue"|"guess", "enabled": true|false, "seconds": 15-600} the time limit of the clue or
 //                        of the guessing; cancels everybody's ready                       (X-Token)
@@ -23,14 +25,18 @@
 //   POST /api/leave      leaves the room (see below)                                       (X-Token)
 // Match:
 //   GET  /api/state      the room code, the turn, the cards left, the time left, the clue and tries left, the winner,
-//                        who you are                                                        (X-Token)
+//                        who you are, whether the game is co-operative, and whether leaving would make your team
+//                        forfeit                                                            (X-Token)
 //   GET  /api/board      the 25 cards as YOU may see them                                  (X-Token)
 //   POST /api/clue       {"text": "1-2 words", "number": n} the SPY's clue of the turn     (X-Token)
 //   POST /api/guess      {"index": 0-24} -> {"key"}   only after the clue; every guess is a try   (X-Token)
 //   POST /api/end-turn                                                                     (X-Token)
 //   POST /api/forfeit    your team gives up (any of its players, any time): the other team wins   (X-Token)
-// Leaving: in the waiting room it just frees your name and seat. During a match it makes your team forfeit (so nobody
-// waits for a player who is gone), and after the match it changes nothing. When the last player has left, the room is gone.
+// Leaving: in the waiting room it just frees your name and seat. During a match your team goes on without you, unless
+// it is left without a spy or without a guesser: then it forfeits (so nobody waits for a team that cannot play). After
+// the match it changes nothing. When the last player has left, the room is gone.
+// A game with fewer than 4 players is co-operative: everybody plays on the BLUE team (the roles they picked are kept; if
+// they all picked the same one, a random player takes the other), and the team wins by finding all the BLUE cards.
 // /images/... serves assets/images/ (the card pictures) and, if a web/ folder exists, / serves the front-end.
 #include <algorithm>
 #include <iostream>
@@ -229,16 +235,16 @@ int main(int argc, char* argv[]) {
     server.Get("/api/lobby", endpoint([](const httplib::Request& req) {
         Visitor in = visitorOf(req);
         const Lobby& lobby = in.room.waitingRoom();
-        json players = json::array(), slots = json::array();
+        json players = json::array();
         for (const Member& member : lobby.members()) {
             players.push_back(memberJson(member));
         }
-        for (const Slot& slot : lobby.openSlots()) {
-            slots.push_back({{"team", toString(slot.first)}, {"role", toString(slot.second)}});
-        }
+        string missing = lobby.missing();
         return json{{"code", in.room.code()}, {"started", in.room.started()},
                     {"finished", in.room.started() && in.room.match().isFinished()},
-                    {"totalSeats", lobby.totalSeats()}, {"players", players}, {"openSlots", slots},
+                    {"minPlayers", Lobby::minPlayers}, {"maxPlayers", Lobby::maxPlayers},
+                    {"teamGameMinPlayers", Lobby::teamGameMinPlayers}, {"cooperative", lobby.cooperative()},
+                    {"missing", missing.empty() ? json(nullptr) : json(missing)}, {"players", players},
                     {"universes", universesJson(in.room)},
                     {"charactersSelected", in.room.characters().charactersIn(lobby.universes())},
                     {"charactersNeeded", Catalog::cardsOnBoard}, {"timers", timersJson(in.room)}};
@@ -298,6 +304,9 @@ int main(int argc, char* argv[]) {
         if (in.room.started()) {
             Match& match = in.room.match();               // brings the clock up to date first
             answer["finished"] = match.isFinished();
+            answer["cooperative"] = match.isCooperative();
+            answer["playerCount"] = match.players().size();
+            answer["leavingForfeits"] = match.leavingForfeits(you.name);
             // The countdown of the phase the turn is in: giving the clue, or guessing after it.
             answer["timer"] = {{"phase", match.hasClue() ? "GUESS" : "CLUE"}, {"enabled", match.hasTimeLimit()},
                                {"seconds", match.phaseLimitSeconds()},
