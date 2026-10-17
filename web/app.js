@@ -130,53 +130,66 @@
         token = null;
         storage.set(null);
         $('whoami').hidden = true;
+        setRoomBadge(null);
         resetRendering();
         document.title = BASE_TITLE;
     }
 
     // ---------- Join screen: just a name ----------
 
-    function renderJoin(lobby) {
+    function goToStart() {
         show('join');
-        if (!changed('join', lobby)) return;
-
-        const full = lobby.players.length >= lobby.totalSeats;
-        const closed = lobby.started || full;
-        $('join-btn').disabled = closed;
-        $('name').disabled = closed;
-        $('join-note').hidden = !closed;
-        $('join-note').textContent = lobby.finished
-            ? 'The last game is over. The room opens again when all its players have left.'
-            : (lobby.started ? 'A game is already in progress. Wait until it is over and its players have left the room.'
-                : (full ? 'The waiting room is full.' : ''));
-        renderPlayers($('join-players'), lobby.players);
     }
 
-    $('join-form').addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const name = $('name').value.trim();
-        if (!name) return showError('join-error', 'Type your name.');
+    function setRoomBadge(code) {
+        $('room-badge').textContent = code ? `Room ${code}` : '';
+        $('room-badge').hidden = !code;
+    }
 
+    // Both ways in (making a room, or entering one with its code) end the same way: a token, and the waiting room.
+    async function enterRoom(path, body) {
         showError('join-error', '');
-        $('join-btn').disabled = true;
+        $('create-btn').disabled = $('join-btn').disabled = true;
         try {
-            const joined = await api('POST', '/api/join', { name });
-            token = joined.token;
+            const entered = await api('POST', path, body);
+            token = entered.token;
             storage.set(token);
             resetRendering();
             await refreshPlay();
         } catch (error) {
             showError('join-error', error.message);
-            resetRendering();
-            refreshJoin().catch(() => {});
         } finally {
-            $('join-btn').disabled = false;
+            $('create-btn').disabled = $('join-btn').disabled = false;
         }
+    }
+
+    function typedName() {
+        const name = $('name').value.trim();
+        if (!name) showError('join-error', 'Type your name.');
+        return name;
+    }
+
+    $('create-btn').addEventListener('click', () => {
+        const name = typedName();
+        if (name) enterRoom('/api/rooms/create', { name });
     });
 
-    async function refreshJoin() {
-        renderJoin(await api('GET', '/api/lobby'));
-    }
+    // The form is sent with the "Join" button, or with Enter in the code field
+    $('join-form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const name = typedName();
+        if (!name) return;
+        const code = $('room-code-input').value.trim();
+        if (!code) return showError('join-error', 'Type the room code, or press "Create a room".');
+        enterRoom('/api/rooms/join', { name, code });
+    });
+
+    // An invite link (/?room=K7QD2) fills in the code
+    (function prefillCode() {
+        let code = null;
+        try { code = new URLSearchParams(location.search).get('room'); } catch (e) { /* no query string */ }
+        if (code) $('room-code-input').value = code.slice(0, 12);
+    })();
 
     // ---------- Waiting room: pick a team and a role, then press ready ----------
 
@@ -208,6 +221,17 @@
             $('teams').append(card);
         }
     })();
+
+    // The invite link opens the start page with the code already typed.
+    $('copy-code').addEventListener('click', async () => {
+        const link = `${location.origin}/?room=${$('room-code').textContent}`;
+        try {
+            await navigator.clipboard.writeText(link);
+            toast('Invite link copied. Send it to the other players.');
+        } catch (error) {
+            toast(`Send this link to the other players: ${link}`);      // no clipboard access (for example, a page without https)
+        }
+    });
 
     // Universes: one checkbox per universe that has characters, built the first time the server tells us which they are.
     const universeBoxes = {};     // 'MCU' -> { input, num }
@@ -352,6 +376,7 @@
     function renderWait(lobby, you) {
         show('wait');
         me = you;
+        $('room-code').textContent = lobby.code;
         if (!changed('wait', { lobby, you })) return;
 
         const players = lobby.players;
@@ -437,7 +462,7 @@
             if (error.status !== 401) return showError('wait-error', error.message);
         }
         forgetSeat();
-        refreshJoin().catch(() => {});
+        goToStart();
     });
 
     // Only the universe that was clicked is sent, so a page that is a moment out of date cannot undo what somebody else just did.
@@ -811,7 +836,7 @@
         busy = false;
         asking = null;
         forgetSeat();
-        refreshJoin().catch(() => {});
+        goToStart();
     }
 
     async function forfeit() {
@@ -843,6 +868,7 @@
 
     async function refreshPlay() {
         const state = await api('GET', '/api/state');
+        setRoomBadge(state.room);
         myTeam = state.you.team;
         if (!state.started) {
             renderWhoAmI(state.you);
@@ -854,12 +880,12 @@
 
     async function tick() {
         try {
-            if (token) await refreshPlay(); else await refreshJoin();
+            if (token) await refreshPlay(); else goToStart();
             setConnection('');
         } catch (error) {
             if (error.status === 401) {
-                forgetSeat();            // the server forgot this token (it was restarted): back to the join screen
-                refreshJoin().catch(() => {});
+                forgetSeat();            // the server forgot this token (it was restarted, or the room is gone): back to the start page
+                goToStart();
             } else {
                 setConnection('Connection to the server lost. Retrying...');
             }

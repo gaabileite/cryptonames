@@ -83,7 +83,19 @@ h3 { margin: 28px 0 8px; font-size: 1rem; color: var(--muted); }
 
 /* ---------- Join / wait ---------- */
 
-#join-form { max-width: 520px; }
+#join-form { max-width: 720px; }
+.topbar-right { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.room-badge { padding: 2px 10px; font-weight: 800; letter-spacing: 0.08em; background: var(--bg); border: 1px solid var(--border); border-radius: 999px; }
+
+.room-options { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 22px; }
+.room-option { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.room-option h3 { margin: 0; font-size: 1.1rem; color: var(--text); }
+.room-option p { margin: 0; }
+.room-option input[type="text"] { text-transform: uppercase; letter-spacing: 0.12em; font-weight: 700; }
+.room-option button { margin-top: auto; }
+
+.room-code-box { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 0 0 12px; }
+.room-code { font-size: 1.8rem; letter-spacing: 0.18em; }
 
 label { display: block; margin-bottom: 6px; font-weight: 600; }
 
@@ -437,6 +449,7 @@ button.danger:disabled { opacity: 0.4; cursor: not-allowed; }
     .status { grid-template-columns: 1fr 1fr; }
     .hint { grid-column: 1 / -1; order: 3; }
     .teams { grid-template-columns: 1fr; }
+    .room-options { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

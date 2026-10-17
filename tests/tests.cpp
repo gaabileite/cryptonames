@@ -4,6 +4,7 @@
 #include <set>
 #include "game/lobby.h"
 #include "game/match.h"
+#include "game/rooms.h"
 
 int failures = 0;
 
@@ -521,6 +522,258 @@ void testClues() {
     }
 }
 
+// ---- rooms
+
+template <class E, class F> bool throwsType(F action) {
+    try { action(); } catch (const E&) { return true; } catch (...) { return false; }
+    return false;
+}
+
+// 30 MCU characters and 30 FOX X-MEN ones, so universes can be chosen.
+Catalog twoUniverses() {
+    vector<Character> all;
+    for (int i = 0; i < 30; i++) all.push_back(Character("M" + to_string(i), M_CharacterType::PERSON, M_Universe::MCU, "images/mcu/m" + to_string(i)));
+    for (int i = 0; i < 30; i++) all.push_back(Character("X" + to_string(i), M_CharacterType::PERSON, M_Universe::FOX_XMEN, "images/fox_x_men/x" + to_string(i)));
+    return Catalog(all);
+}
+
+// Four players in the room, seated and ready; the match starts when the last one is ready.
+map<string, string> fillRoom(Room& room, bool startMatch = true) {
+    map<string, string> tokens;
+    const char* names[4] = {"bs", "bg", "rs", "rg"};
+    Team teams[4] = {Team::BLUE, Team::BLUE, Team::RED, Team::RED};
+    Role roles[4] = {Role::SPY, Role::GUESSER, Role::SPY, Role::GUESSER};
+    for (int i = 0; i < 4; i++) {
+        tokens[names[i]] = room.join(names[i]);
+        room.chooseSeat(tokens[names[i]], teams[i], roles[i]);
+    }
+    if (startMatch) for (int i = 0; i < 4; i++) room.setReady(tokens[names[i]], true);
+    return tokens;
+}
+
+void testRoom() {
+    Catalog catalog = twoUniverses();
+    Room room("ABCDE", catalog);
+    CHECK(room.code() == "ABCDE" && room.isEmpty() && !room.started());
+    CHECK(room.waitingRoom().universes().size() == 2);                       // only the universes that have characters
+
+    string ana = room.join("  Ana ");
+    CHECK(room.member(ana).name == "Ana" && !room.isEmpty());                // trimmed
+    CHECK(rejects([&] { room.join("Ana"); }));                              // names are unique in the room
+    CHECK(rejects([&] { room.join("   "); }));
+    CHECK(throwsType<NotInRoom>([&] { room.member("not a token"); }));
+    CHECK(throwsType<NotInRoom>([&] { room.chooseSeat("not a token", Team::BLUE, Role::SPY); }));
+    string bia = room.join("Bia");
+    CHECK(ana != bia && room.member(bia).name == "Bia");
+
+    // the waiting room rules, through the room
+    room.chooseSeat(ana, Team::BLUE, Role::SPY);
+    CHECK(rejects([&] { room.chooseSeat(bia, Team::BLUE, Role::SPY); }));    // taken
+    CHECK(rejects([&] { room.setReady(bia, true); }));                       // no seat yet
+    room.setUniverse(bia, M_Universe::MCU, false);                           // 30 FOX characters are left: enough
+    CHECK(room.waitingRoom().universes().size() == 1 && room.waitingRoom().universes().count(M_Universe::FOX_XMEN));
+    CHECK(rejects([&] { room.setUniverse(ana, M_Universe::FOX_XMEN, false); }));     // nothing would be left
+    CHECK(rejects([&] { room.setUniverse(ana, M_Universe::VENOM, true); }));          // no characters there
+    room.setUniverse(ana, M_Universe::MCU, true);
+    room.setTimer(ana, TimerPhase::CLUE, true, 45);
+    CHECK(room.waitingRoom().timer(TimerPhase::CLUE).enabled && room.waitingRoom().timer(TimerPhase::CLUE).seconds == 45);
+    room.setTimer(ana, TimerPhase::CLUE, false, nullopt);                    // no seconds: the 45 are kept
+    CHECK(!room.waitingRoom().timer(TimerPhase::CLUE).enabled && room.waitingRoom().timer(TimerPhase::CLUE).seconds == 45);
+    CHECK(rejects([&] { room.setTimer(ana, TimerPhase::GUESS, true, 14); }));
+    CHECK(rejects([&] { room.setTimer(ana, TimerPhase::GUESS, true, 4294967311LL); }));   // would wrap around to 15
+    CHECK(throwsType<NotInRoom>([&] { room.setTimer("nope", TimerPhase::GUESS, true, 30); }));
+    CHECK(throwsType<WrongStage>([&] { room.match(); }));                    // no match yet
+
+    // leaving before the start: the name and seat are free again
+    room.leave(bia);
+    CHECK(throwsType<NotInRoom>([&] { room.member(bia); }) && !room.isEmpty());
+    string bia2 = room.join("Bia");
+    CHECK(room.member(bia2).name == "Bia");
+    room.leave(bia2); room.leave(ana);
+    CHECK(room.isEmpty());
+}
+
+void testRoomMatch() {
+    Catalog catalog = twoUniverses();
+    {   // a match starts by itself when everybody is ready, and then the waiting room is closed
+        Room room("ROOM1", catalog);
+        map<string, string> t = fillRoom(room, false);
+        for (string name : {"bs", "bg", "rs"}) room.setReady(t[name], true);
+        CHECK(!room.started());                                              // one is not ready
+        room.setReady(t["rg"], true);
+        CHECK(room.started());
+        CHECK(throwsType<WrongStage>([&] { room.join("late"); }));
+        CHECK(throwsType<WrongStage>([&] { room.chooseSeat(t["bs"], Team::RED, Role::SPY); }));
+        CHECK(throwsType<WrongStage>([&] { room.setReady(t["bs"], false); }));
+        CHECK(throwsType<WrongStage>([&] { room.setUniverse(t["bs"], M_Universe::MCU, false); }));
+        CHECK(throwsType<WrongStage>([&] { room.setTimer(t["bs"], TimerPhase::CLUE, true, 30); }));
+
+        Match& match = room.match();
+        Team team = match.currentTeam();
+        string spy = team == Team::BLUE ? "bs" : "rs", guesser = team == Team::BLUE ? "bg" : "rg";
+        match.giveClue(room.member(t[spy]).name, "HELLO", 1);
+        vector<int> mine = cardsWithKey(match, spy, keyOf(team));
+        CHECK(match.guess(room.member(t[guesser]).name, mine[0]) == keyOf(team));
+    }
+    {   // the match only draws from the chosen universes
+        Room room("ROOM2", catalog);
+        map<string, string> t = fillRoom(room, false);
+        room.setUniverse(t["bs"], M_Universe::MCU, false);
+        for (string name : {"bs", "bg", "rs", "rg"}) room.setReady(t[name], true);
+        for (const CardView& card : room.match().viewFor("bs")) CHECK(card.characterName[0] == 'X');
+    }
+    {   // leaving in the middle of a match makes the team forfeit; the other players stay
+        Room room("ROOM3", catalog);
+        map<string, string> t = fillRoom(room);
+        room.leave(t["rs"]);
+        CHECK(room.match().isFinished() && room.match().wasForfeited() && room.match().forfeitedBy() == Team::RED && room.match().winner() == Team::BLUE);
+        CHECK(throwsType<NotInRoom>([&] { room.member(t["rs"]); }) && !room.isEmpty());
+        room.leave(t["bg"]);                                                 // after the end, leaving changes nothing
+        CHECK(room.match().forfeitedBy() == Team::RED);
+        room.leave(t["bs"]); room.leave(t["rg"]);
+        CHECK(room.isEmpty());
+    }
+}
+
+void testRoomRegistry() {
+    Catalog catalog = twoUniverses();
+    typedef RoomRegistry::Clock Clock;
+    string letters = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+    CHECK(RoomRegistry::normalizeCode("k7q-d2") == "K7QD2" && RoomRegistry::normalizeCode("  ab c12 ") == "ABC12");
+
+    {   // creating: a code of 5 letters and digits that cannot be mistaken for each other, and the creator is inside
+        RoomRegistry rooms(catalog);
+        RoomRegistry::Entry first = rooms.create("Ana");
+        const string code = first.room->code();
+        CHECK(code.size() == 5 && code.find_first_not_of(letters) == string::npos);
+        CHECK(first.room->member(first.token).name == "Ana" && rooms.size() == 1 && rooms.contains(code));
+        CHECK(&rooms.roomOf(first.token) == first.room);
+        CHECK(rejects([&] { rooms.create("   "); }) && rooms.size() == 1);   // a rejected name leaves no room behind
+
+        // joining: the code can be typed any way
+        RoomRegistry::Entry second = rooms.join("  " + string(1, (char)tolower(code[0])) + code.substr(1, 2) + "-" + code.substr(3) + " ", "Bia");
+        CHECK(second.room == first.room && rooms.roomOf(second.token).member(second.token).name == "Bia");
+        CHECK(throwsType<NoSuchRoom>([&] { rooms.join("00000", "Cris"); }));      // zeros are never in a code
+        CHECK(throwsType<NoSuchRoom>([&] { rooms.join("", "Cris"); }));
+        CHECK(rejects([&] { rooms.join(code, "Ana"); }));                    // the name is taken in that room
+        CHECK(throwsType<NotInRoom>([&] { rooms.roomOf("not a token"); }));
+        CHECK(rooms.size() == 1);
+    }
+    {   // codes do not repeat
+        RoomRegistry rooms(catalog, 2000);
+        set<string> seen;
+        for (int i = 0; i < 1000; i++) seen.insert(rooms.create("p").room->code());
+        CHECK(seen.size() == 1000 && rooms.size() == 1000);
+    }
+    {   // a full room, and a room that already started
+        RoomRegistry rooms(catalog);
+        RoomRegistry::Entry host = rooms.create("p0");
+        const string code = host.room->code();
+        for (int i = 1; i < 4; i++) rooms.join(code, "p" + to_string(i));
+        CHECK(rejects([&] { rooms.join(code, "p4"); }));                     // 4 seats, 4 players
+        CHECK(rooms.roomOf(host.token).waitingRoom().isFull());
+    }
+    {   // rooms are separate: players, boards and turns never mix
+        RoomRegistry rooms(catalog);
+        RoomRegistry::Entry a = rooms.create("bs"), b = rooms.create("bs");  // the same name in two different rooms is fine
+        CHECK(a.room != b.room && a.room->code() != b.room->code() && a.token != b.token);
+        const Team teams[4] = {Team::BLUE, Team::BLUE, Team::RED, Team::RED};
+        const Role roles[4] = {Role::SPY, Role::GUESSER, Role::SPY, Role::GUESSER};
+        const char* names[4] = {"bs", "bg", "rs", "rg"};
+        map<string, string> ta, tb;
+        ta["bs"] = a.token; tb["bs"] = b.token;
+        for (int i = 1; i < 4; i++) { ta[names[i]] = rooms.join(a.room->code(), names[i]).token; tb[names[i]] = rooms.join(b.room->code(), names[i]).token; }
+        for (int i = 0; i < 4; i++) {
+            rooms.roomOf(ta[names[i]]).chooseSeat(ta[names[i]], teams[i], roles[i]);
+            rooms.roomOf(tb[names[i]]).chooseSeat(tb[names[i]], teams[i], roles[i]);
+        }
+        for (int i = 0; i < 4; i++) rooms.roomOf(ta[names[i]]).setReady(ta[names[i]], true);
+        CHECK(a.room->started() && !b.room->started());                      // only room A started
+        for (int i = 0; i < 3; i++) rooms.roomOf(tb[names[i]]).setReady(tb[names[i]], true);
+        CHECK(!b.room->started());
+        rooms.roomOf(tb["rg"]).setReady(tb["rg"], true);
+        CHECK(b.room->started());
+
+        Match& ma = a.room->match();
+        Match& mb = b.room->match();
+        Team team = ma.currentTeam();
+        string spy = team == Team::BLUE ? "bs" : "rs", guesser = team == Team::BLUE ? "bg" : "rg";
+        ma.giveClue(spy, "A CLUE", 2);
+        vector<int> mine = cardsWithKey(ma, spy, keyOf(team));
+        ma.guess(guesser, mine[0]);
+        CHECK(ma.hasClue() && ma.currentClue().found == 1 && ma.remaining(team) == 7);
+        CHECK(!mb.hasClue() && mb.remaining(Team::BLUE) == 8 && mb.remaining(Team::RED) == 8 && mb.clueHistory().empty());   // B did not notice
+        a.room->match().forfeit("bs");
+        CHECK(ma.isFinished() && !mb.isFinished());
+        // each token leads to its own room
+        CHECK(&rooms.roomOf(ta["rg"]) == a.room && &rooms.roomOf(tb["rg"]) == b.room);
+    }
+    {   // a room disappears when its last player leaves
+        RoomRegistry rooms(catalog);
+        RoomRegistry::Entry host = rooms.create("Ana");
+        const string code = host.room->code();
+        RoomRegistry::Entry guest = rooms.join(code, "Bia");
+        rooms.leave(host.token);
+        CHECK(rooms.size() == 1 && rooms.contains(code));                    // Bia is still there
+        CHECK(throwsType<NotInRoom>([&] { rooms.roomOf(host.token); }));
+        RoomRegistry::Entry again = rooms.join(code, "Ana");                 // and Ana's name was free again
+        CHECK(again.room == guest.room);
+        rooms.leave(guest.token); rooms.leave(again.token);
+        CHECK(rooms.size() == 0 && !rooms.contains(code));
+        CHECK(throwsType<NoSuchRoom>([&] { rooms.join(code, "Late"); }));    // the code does not work any more
+        CHECK(throwsType<NotInRoom>([&] { rooms.roomOf(guest.token); }) && throwsType<NotInRoom>([&] { rooms.roomOf(again.token); }));
+        CHECK(throwsType<NotInRoom>([&] { rooms.leave(guest.token); }));     // leaving twice
+    }
+    {   // leaving a started match forfeits; when everybody has left the room is gone
+        RoomRegistry rooms(catalog);
+        RoomRegistry::Entry host = rooms.create("bs");
+        map<string, string> t; t["bs"] = host.token;
+        for (string name : {"bg", "rs", "rg"}) t[name] = rooms.join(host.room->code(), name).token;
+        const Team teams[3] = {Team::BLUE, Team::RED, Team::RED};
+        const Role roles[3] = {Role::GUESSER, Role::SPY, Role::GUESSER};
+        rooms.roomOf(t["bs"]).chooseSeat(t["bs"], Team::BLUE, Role::SPY);
+        int i = 0; for (string name : {"bg", "rs", "rg"}) { rooms.roomOf(t[name]).chooseSeat(t[name], teams[i], roles[i]); i++; }
+        for (string name : {"bs", "bg", "rs", "rg"}) rooms.roomOf(t[name]).setReady(t[name], true);
+        CHECK(host.room->started());
+        Room* room = host.room;
+        rooms.leave(t["bg"]);
+        CHECK(room->match().isFinished() && room->match().forfeitedBy() == Team::BLUE);
+        rooms.leave(t["bs"]); rooms.leave(t["rs"]);
+        CHECK(rooms.size() == 1);
+        rooms.leave(t["rg"]);
+        CHECK(rooms.size() == 0);
+    }
+    {   // a room nobody uses is forgotten; one that is in use is not
+        RoomRegistry rooms(catalog, 200, chrono::minutes(30));
+        Clock::time_point start = Clock::now();
+        RoomRegistry::Entry idle = rooms.create("idle", start);
+        RoomRegistry::Entry busy = rooms.create("busy", start);
+        const string idleCode = idle.room->code();
+        CHECK(&rooms.roomOf(busy.token, start + chrono::minutes(20)) == busy.room);      // used at minute 20
+        rooms.sweep(start + chrono::minutes(29));
+        CHECK(rooms.size() == 2);
+        rooms.sweep(start + chrono::minutes(31));
+        CHECK(rooms.size() == 1 && !rooms.contains(idleCode) && rooms.contains(busy.room->code()));     // idle: 31 min; busy: 11 min
+        CHECK(throwsType<NotInRoom>([&] { rooms.roomOf(idle.token, start + chrono::minutes(31)); }));
+        CHECK(throwsType<NoSuchRoom>([&] { rooms.join(idleCode, "late", start + chrono::minutes(31)); }));
+        RoomRegistry::Entry joined = rooms.join(busy.room->code(), "friend", start + chrono::minutes(45));   // joining counts as use
+        CHECK(rooms.size() == 1 && joined.room == busy.room);
+        CHECK(rooms.size() == 1 && rooms.contains(busy.room->code()));
+        rooms.create("new", start + chrono::minutes(200));                   // creating sweeps too: the busy one expired by now
+        CHECK(rooms.size() == 1 && !rooms.contains(busy.room->code()));
+    }
+    {   // a limit on the number of rooms
+        RoomRegistry rooms(catalog, 3);
+        RoomRegistry::Entry a = rooms.create("a"), b = rooms.create("b"), c = rooms.create("c");
+        CHECK(throwsType<RoomLimit>([&] { rooms.create("d"); }) && rooms.size() == 3);
+        rooms.leave(b.token);
+        RoomRegistry::Entry d = rooms.create("d");                           // there is space again
+        CHECK(rooms.size() == 3 && d.room->member(d.token).name == "d");
+        (void)a; (void)c;
+    }
+}
+
 void testGrid() {
     for (int run = 0; run < 500; run++) {
         Grid grid(characters());
@@ -738,6 +991,9 @@ int main() {
     run("universes", testUniverses);
     run("timer", testTimer);
     run("clues", testClues);
+    run("room", testRoom);
+    run("room match", testRoomMatch);
+    run("room registry", testRoomRegistry);
     run("grid", testGrid);
     run("match setup and views", testMatchSetupAndViews);
     run("match permissions", testMatchPermissions);

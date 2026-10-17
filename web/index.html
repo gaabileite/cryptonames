@@ -10,7 +10,10 @@
 <body>
     <header class="topbar">
         <h1>Online Boardgame</h1>
-        <div id="whoami" class="whoami" hidden></div>
+        <div class="topbar-right">
+            <span id="room-badge" class="room-badge" hidden></span>
+            <div id="whoami" class="whoami" hidden></div>
+        </div>
     </header>
 
     <div id="connection" class="connection" role="alert" hidden></div>
@@ -18,23 +21,36 @@
     <main>
         <!-- Join: just a name -->
         <section id="screen-join" hidden>
-            <h2>Join the game</h2>
+            <h2>Play</h2>
             <form id="join-form" novalidate>
                 <label for="name">Your name</label>
                 <input id="name" name="name" type="text" maxlength="30" autocomplete="nickname" required>
 
-                <button id="join-btn" type="submit" class="primary">Join</button>
+                <div class="room-options">
+                    <div class="room-option">
+                        <h3>Create a room</h3>
+                        <p class="note">Start a new room. You get a code to share with the other players.</p>
+                        <button id="create-btn" type="button" class="primary">Create a room</button>
+                    </div>
+                    <div class="room-option">
+                        <h3>Join a room</h3>
+                        <label for="room-code-input">Room code</label>
+                        <input id="room-code-input" type="text" maxlength="12" placeholder="K7QD2" autocomplete="off" autocapitalize="characters" spellcheck="false">
+                        <button id="join-btn" type="submit" class="primary">Join the room</button>
+                    </div>
+                </div>
                 <p id="join-error" class="error" role="alert" hidden></p>
-                <p id="join-note" class="note" hidden></p>
             </form>
-
-            <h3>In the waiting room</h3>
-            <ul id="join-players" class="players"></ul>
         </section>
 
         <!-- Waiting room: pick (and change) team and role, then press ready -->
         <section id="screen-wait" hidden>
             <h2>Waiting room</h2>
+            <div class="room-code-box">
+                <span class="note">Room code</span>
+                <strong id="room-code" class="room-code"></strong>
+                <button id="copy-code" type="button" class="link">Copy invite link</button>
+            </div>
             <p id="wait-count" class="note"></p>
 
             <div id="teams" class="teams"></div>

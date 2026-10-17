@@ -1,45 +1,46 @@
-// HTTP server for the board game: one Lobby, then one Match, shared by every browser that connects.
+// HTTP server for the board game: many rooms at once, each with its own waiting room and match.
 //
 // Build: make server
 // Run:   build/server [port] [host]      (defaults: 8080 127.0.0.1) - run it from the project folder.
 //
 // Every endpoint answers JSON. A rejected action answers {"error": "..."} with a 4xx status.
-// Players identify themselves with the token they get from /api/join, sent in the X-Token header.
+// A room has a random code. A player makes a room or enters one with its code, and gets a secret token; from then on
+// the token, sent in the X-Token header, identifies both the player and the room, so every other endpoint is the same
+// for all rooms. A room disappears when its last player leaves it (or when nobody has used it for 2 hours).
 //
+// Entering:
+//   POST /api/rooms/create  {"name"} makes a room and puts you in it -> {"code", "token", ...}
+//   POST /api/rooms/join    {"code", "name"} -> {"code", "token", ...}          404 if there is no such room
 // Waiting room (until every seat is taken and everybody is ready, then the match starts by itself):
-//   GET  /api/lobby      who is in the waiting room (team and role are null until picked, plus "ready"), the open seats,
-//                        the universes with their character count and whether they are selected, and the time limits
-//   POST /api/join       {"name"} -> {"token", ...}
+//   GET  /api/lobby      the room code, who is in the waiting room (team and role are null until picked, plus "ready"),
+//                        the open seats, the universes with their character count and whether they are selected,
+//                        and the time limits                                                (X-Token)
 //   POST /api/seat       {"team", "role"} picks or changes your seat; not while ready      (X-Token)
+//   POST /api/universes  {"universe": "MCU", "selected": true|false} switches one universe on or off; cancels everybody's ready (X-Token)
 //   POST /api/timer      {"phase": "clue"|"guess", "enabled": true|false, "seconds": 15-600} the time limit of the clue or
 //                        of the guessing; cancels everybody's ready                       (X-Token)
 //   POST /api/ready      {"ready": true|false}                                             (X-Token)
-//   POST /api/universes  {"universe": "MCU", "selected": true|false} switches one universe on or off; cancels everybody's ready (X-Token)
 //   POST /api/leave      leaves the room (see below)                                       (X-Token)
 // Match:
-//   GET  /api/state      the turn, the cards left, the time left, the clue and tries left, the winner, who you are  (X-Token)
+//   GET  /api/state      the room code, the turn, the cards left, the time left, the clue and tries left, the winner,
+//                        who you are                                                        (X-Token)
 //   GET  /api/board      the 25 cards as YOU may see them                                  (X-Token)
-//   POST /api/clue       {"text": "1-2 words", "number": n} the SPY's clue of the turn            (X-Token)
+//   POST /api/clue       {"text": "1-2 words", "number": n} the SPY's clue of the turn     (X-Token)
 //   POST /api/guess      {"index": 0-24} -> {"key"}   only after the clue; every guess is a try   (X-Token)
 //   POST /api/end-turn                                                                     (X-Token)
 //   POST /api/forfeit    your team gives up (any of its players, any time): the other team wins   (X-Token)
 // Leaving: in the waiting room it just frees your name and seat. During a match it makes your team forfeit (so nobody
-// waits for a player who is gone), and after the match it changes nothing. When the last player has left, the room
-// becomes a new, empty waiting room.
+// waits for a player who is gone), and after the match it changes nothing. When the last player has left, the room is gone.
 // /images/... serves assets/images/ (the card pictures) and, if a web/ folder exists, / serves the front-end.
 #include <algorithm>
 #include <iostream>
-#include <map>
-#include <memory>
 #include <mutex>
-#include <random>
 #include <functional>
 #include <filesystem>
 #include "httplib.h"
 #include "json.hpp"
 #include "db/database.h"
-#include "game/lobby.h"
-#include "game/match.h"
+#include "game/rooms.h"
 
 using namespace std;
 using json = nlohmann::json;
@@ -50,53 +51,22 @@ struct HttpError : runtime_error {
     HttpError(int status, const string& message) : runtime_error(message), status(status) {}
 };
 
-// A game needs this many characters to fill the board.
-const size_t cardsOnBoard = 25;
+// Everything the server knows lives here. Requests run on several threads, so every handler holds the lock.
+mutex serverLock;
+unique_ptr<Catalog> catalog;
+unique_ptr<RoomRegistry> rooms;
 
-// The whole game lives here. Requests run on several threads, so every handler holds the lock.
-struct GameServer {
-    mutex lock;
-    vector<Character> characters;
-    Lobby lobby;
-    unique_ptr<Match> match;            // created when every seat is taken and everybody is ready
-    map<M_Universe, int> universeSizes; // how many characters each universe has (only the ones that have any)
-    map<string, string> nameOfToken;
+// The player who sent the request, and the room they are in, found through the X-Token header.
+struct Visitor {
+    Room& room;
+    string token;
+    const Member& you;
 };
 
-GameServer game;
-
-string newToken() {
-    random_device device;
-    char token[33];
-    snprintf(token, sizeof(token), "%08x%08x%08x%08x", device(), device(), device(), device());
-    return token;
-}
-
-// The player who sent the request, found through the X-Token header.
-const Member& memberOf(const httplib::Request& req) {
-    auto token = game.nameOfToken.find(req.get_header_value("X-Token"));
-    if (token != game.nameOfToken.end()) {
-        for (const Member& member : game.lobby.members()) {
-            if (member.name == token->second) return member;
-        }
-    }
-    throw HttpError(401, "Unknown or missing token. Join the game first");
-}
-
-// The waiting room is closed once the match has started.
-void requireWaitingRoom() {
-    if (game.match) {
-        throw HttpError(409, "The game has already started");
-    }
-}
-
-// The match, with its clock brought up to date: when the time of a turn has run out, the turn has already passed.
-Match& startedMatch() {
-    if (!game.match) {
-        throw HttpError(409, "The game has not started yet");
-    }
-    game.match->advanceClock();
-    return *game.match;
+Visitor visitorOf(const httplib::Request& req) {
+    string token = req.get_header_value("X-Token");
+    Room& room = rooms->roomOf(token);               // throws NotInRoom
+    return Visitor{room, token, room.member(token)};
 }
 
 json bodyOf(const httplib::Request& req) {
@@ -114,6 +84,13 @@ string textField(const json& body, const string& field) {
     return body[field];
 }
 
+bool booleanField(const json& body, const string& field) {
+    if (!body.contains(field) || !body[field].is_boolean()) {
+        throw HttpError(400, "Missing true/false field: " + field);
+    }
+    return body[field];
+}
+
 // team and role are null while the player has not picked a seat.
 json memberJson(const Member& member) {
     json answer = {{"name", member.name}, {"team", nullptr}, {"role", nullptr}, {"ready", member.ready}};
@@ -124,67 +101,63 @@ json memberJson(const Member& member) {
     return answer;
 }
 
-// The waiting room starts with every universe that has characters selected.
-Lobby newLobby() {
-    set<M_Universe> all;
-    for (const auto& universe : game.universeSizes) all.insert(universe.first);
-    Lobby lobby;
-    lobby.chooseUniverses(all);
-    return lobby;
-}
-
-int charactersIn(const set<M_Universe>& universes) {
-    int count = 0;
-    for (M_Universe universe : universes) {
-        auto size = game.universeSizes.find(universe);
-        if (size != game.universeSizes.end()) count += size->second;
-    }
-    return count;
-}
-
 json clueJson(const Clue& clue) {
     return {{"team", toString(clue.team)}, {"text", clue.text}, {"number", clue.number},
             {"bonusTries", clue.bonusTries}, {"found", clue.found}};
 }
 
-json timersJson() {
+json timersJson(const Room& room) {
     json answer = {{"min", Lobby::minTurnSeconds}, {"max", Lobby::maxTurnSeconds}};
     for (TimerPhase phase : {TimerPhase::CLUE, TimerPhase::GUESS}) {
-        const TimeLimit& limit = game.lobby.timer(phase);
+        const TimeLimit& limit = room.waitingRoom().timer(phase);
         answer[phase == TimerPhase::CLUE ? "clue" : "guess"] = {{"enabled", limit.enabled}, {"seconds", limit.seconds}};
     }
     return answer;
 }
 
-json universesJson() {
+json universesJson(const Room& room) {
     // The biggest universe first
-    vector<pair<M_Universe, int>> sorted(game.universeSizes.begin(), game.universeSizes.end());
+    const map<M_Universe, int>& sizes = room.characters().universeSizes;
+    vector<pair<M_Universe, int>> sorted(sizes.begin(), sizes.end());
     stable_sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
     json list = json::array();
     for (const auto& universe : sorted) {
         list.push_back({{"name", toString(universe.first)}, {"count", universe.second},
-                        {"selected", game.lobby.universes().count(universe.first) > 0}});
+                        {"selected", room.waitingRoom().universes().count(universe.first) > 0}});
     }
     return list;
 }
 
-bool booleanField(const json& body, const string& field) {
-    if (!body.contains(field) || !body[field].is_boolean()) {
-        throw HttpError(400, "Missing true/false field: " + field);
-    }
-    return body[field];
+// What a player gets when they enter a room.
+json enteredJson(const RoomRegistry::Entry& entry) {
+    json answer = memberJson(entry.room->member(entry.token));
+    answer["token"] = entry.token;
+    answer["code"] = entry.room->code();
+    return answer;
 }
 
 // Wraps an action: takes the lock, answers its JSON, and turns exceptions into error answers.
 httplib::Server::Handler endpoint(function<json(const httplib::Request&)> action) {
     return [action](const httplib::Request& req, httplib::Response& res) {
-        lock_guard<mutex> guard(game.lock);
+        lock_guard<mutex> guard(serverLock);
         int status = 200;
         json answer;
         try {
             answer = action(req);
         } catch (const HttpError& e) {
             status = e.status;
+            answer = {{"error", e.what()}};
+        } catch (const NotInRoom& e) {
+            status = 401;
+            answer = {{"error", e.what()}};
+        } catch (const NoSuchRoom& e) {
+            status = 404;
+            answer = {{"error", e.what()}};
+        } catch (const WrongStage& e) {
+            status = 409;
+            answer = {{"error", e.what()}};
+        } catch (const RoomLimit& e) {
+            status = 503;
             answer = {{"error", e.what()}};
         } catch (const invalid_argument& e) {
             status = 400;
@@ -214,20 +187,17 @@ int main(int argc, char* argv[]) {
     string host = argc > 2 ? argv[2] : "127.0.0.1";
 
     try {
-        game.characters = loadCharacters(defaultDatabasePath);
+        catalog = make_unique<Catalog>(loadCharacters(defaultDatabasePath));
     } catch (const exception& e) {
         cerr << "Error: " << e.what() << endl;
         return 1;
     }
-    // Checked now because the Match is created when the last player is ready, and it needs 25 characters to fill the board.
-    if (game.characters.size() < cardsOnBoard) {
-        cerr << "Error: the database needs at least " << cardsOnBoard << " characters, found " << game.characters.size() << endl;
+    // Checked now because a match is created when the last player is ready, and it needs 25 characters to fill the board.
+    if (catalog->characters.size() < Catalog::cardsOnBoard) {
+        cerr << "Error: the database needs at least " << Catalog::cardsOnBoard << " characters, found " << catalog->characters.size() << endl;
         return 1;
     }
-    for (const Character& character : game.characters) {
-        game.universeSizes[character.universe]++;
-    }
-    game.lobby = newLobby();
+    rooms = make_unique<RoomRegistry>(*catalog);
 
     httplib::Server server;
 
@@ -236,126 +206,97 @@ int main(int argc, char* argv[]) {
     server.new_task_queue = [] { return new httplib::ThreadPool(64); };
     server.set_keep_alive_timeout(2);
 
-    server.Get("/api/lobby", endpoint([](const httplib::Request&) {
-        json players = json::array(), slots = json::array();
-        for (const Member& member : game.lobby.members()) {
-            players.push_back(memberJson(member));
-        }
-        for (const Slot& slot : game.lobby.openSlots()) {
-            slots.push_back({{"team", toString(slot.first)}, {"role", toString(slot.second)}});
-        }
-        return json{{"started", game.match != nullptr}, {"finished", game.match != nullptr && game.match->isFinished()},
-                    {"totalSeats", game.lobby.totalSeats()},
-                    {"players", players}, {"openSlots", slots},
-                    {"universes", universesJson()}, {"charactersSelected", charactersIn(game.lobby.universes())},
-                    {"charactersNeeded", cardsOnBoard}, {"timers", timersJson()}};
+    // ---- entering a room
+
+    server.Post("/api/rooms/create", endpoint([](const httplib::Request& req) {
+        json body = bodyOf(req);
+        return enteredJson(rooms->create(textField(body, "name")));
     }));
 
-    server.Post("/api/join", endpoint([](const httplib::Request& req) {
+    server.Post("/api/rooms/join", endpoint([](const httplib::Request& req) {
         json body = bodyOf(req);
-        requireWaitingRoom();
-
-        game.lobby.join(textField(body, "name"));       // throws if not allowed
-
-        // The lobby may have trimmed the name, so the token must point to the name it stored.
-        string token = newToken();
-        game.nameOfToken[token] = game.lobby.members().back().name;
-
-        json answer = memberJson(game.lobby.members().back());
-        answer["token"] = token;
-        return answer;
+        string code = textField(body, "code");
+        return enteredJson(rooms->join(code, textField(body, "name")));
     }));
 
     server.Post("/api/leave", endpoint([](const httplib::Request& req) {
-        string name = memberOf(req).name;
-        if (game.match && !game.match->isFinished()) {
-            game.match->forfeit(name);                   // leaving a match that is still going on is a forfeit
-        }
-        game.lobby.leave(name);
-        for (auto token = game.nameOfToken.begin(); token != game.nameOfToken.end();) {
-            token = token->second == name ? game.nameOfToken.erase(token) : next(token);
-        }
-        if (game.lobby.members().empty()) {              // everybody left: the room opens again for a new game
-            game.match.reset();
-            game.lobby = newLobby();
-        }
+        rooms->leave(req.get_header_value("X-Token"));
         return json{{"ok", true}};
+    }));
+
+    // ---- the waiting room
+
+    server.Get("/api/lobby", endpoint([](const httplib::Request& req) {
+        Visitor in = visitorOf(req);
+        const Lobby& lobby = in.room.waitingRoom();
+        json players = json::array(), slots = json::array();
+        for (const Member& member : lobby.members()) {
+            players.push_back(memberJson(member));
+        }
+        for (const Slot& slot : lobby.openSlots()) {
+            slots.push_back({{"team", toString(slot.first)}, {"role", toString(slot.second)}});
+        }
+        return json{{"code", in.room.code()}, {"started", in.room.started()},
+                    {"finished", in.room.started() && in.room.match().isFinished()},
+                    {"totalSeats", lobby.totalSeats()}, {"players", players}, {"openSlots", slots},
+                    {"universes", universesJson(in.room)},
+                    {"charactersSelected", in.room.characters().charactersIn(lobby.universes())},
+                    {"charactersNeeded", Catalog::cardsOnBoard}, {"timers", timersJson(in.room)}};
     }));
 
     server.Post("/api/seat", endpoint([](const httplib::Request& req) {
         json body = bodyOf(req);
-        requireWaitingRoom();
-        string name = memberOf(req).name;
-        game.lobby.chooseSeat(name, teamFromString(textField(body, "team")), roleFromString(textField(body, "role")));
-        return memberJson(memberOf(req));
+        Visitor in = visitorOf(req);
+        in.room.chooseSeat(in.token, teamFromString(textField(body, "team")), roleFromString(textField(body, "role")));
+        return memberJson(in.room.member(in.token));
     }));
 
     server.Post("/api/universes", endpoint([](const httplib::Request& req) {
         json body = bodyOf(req);
-        requireWaitingRoom();
-        memberOf(req);                                   // only somebody in the waiting room can change it
+        Visitor in = visitorOf(req);
         M_Universe universe = universeFromString(textField(body, "universe"));      // throws if it does not exist
-        bool selected = booleanField(body, "selected");
-        if (!game.universeSizes.count(universe)) {
-            throw HttpError(400, "There are no characters in " + toString(universe));
-        }
-
-        // One universe at a time, applied to what the server has now, so two players clicking together do not undo each other.
-        set<M_Universe> chosen = game.lobby.universes();
-        if (selected) chosen.insert(universe); else chosen.erase(universe);
-        if (chosen.empty()) {
-            throw HttpError(400, "Pick at least one universe");
-        }
-        int available = charactersIn(chosen);
-        if (available < (int)cardsOnBoard) {
-            throw HttpError(400, "Those universes only have " + to_string(available) + " characters, and a game needs at least " + to_string(cardsOnBoard));
-        }
-        game.lobby.chooseUniverses(chosen);              // cancels everybody's ready if the choice changed
-        return json{{"universes", universesJson()}, {"charactersSelected", available}, {"charactersNeeded", cardsOnBoard}};
+        in.room.setUniverse(in.token, universe, booleanField(body, "selected"));
+        return json{{"universes", universesJson(in.room)},
+                    {"charactersSelected", in.room.characters().charactersIn(in.room.waitingRoom().universes())},
+                    {"charactersNeeded", Catalog::cardsOnBoard}};
     }));
 
     server.Post("/api/timer", endpoint([](const httplib::Request& req) {
         json body = bodyOf(req);
-        requireWaitingRoom();
-        memberOf(req);                                   // only somebody in the waiting room can change it
+        Visitor in = visitorOf(req);
         string phaseName = textField(body, "phase");
         if (phaseName != "clue" && phaseName != "guess") {
             throw HttpError(400, "The phase must be clue or guess");
         }
-        TimerPhase phase = phaseName == "clue" ? TimerPhase::CLUE : TimerPhase::GUESS;
         bool enabled = booleanField(body, "enabled");
-        int seconds = game.lobby.timer(phase).seconds;   // not sent: keep the seconds that were chosen
+        optional<long long> seconds;                     // not sent: the room keeps the seconds that were chosen
         if (body.contains("seconds")) {
             if (!body["seconds"].is_number_integer()) {
                 throw HttpError(400, "The seconds must be a whole number");
             }
-            long long wanted = body["seconds"].get<long long>();      // not an int: a huge number must not wrap around into a valid one
-            if (wanted < Lobby::minTurnSeconds || wanted > Lobby::maxTurnSeconds) {
-                throw HttpError(400, "The time can be from " + to_string(Lobby::minTurnSeconds) + " to " + to_string(Lobby::maxTurnSeconds) + " seconds");
-            }
-            seconds = (int)wanted;
+            seconds = body["seconds"].get<long long>();
         }
-        game.lobby.chooseTimer(phase, enabled, seconds); // cancels everybody's ready if the setting changed
-        return json{{"timers", timersJson()}};
+        in.room.setTimer(in.token, phaseName == "clue" ? TimerPhase::CLUE : TimerPhase::GUESS, enabled, seconds);
+        return json{{"timers", timersJson(in.room)}};
     }));
 
     server.Post("/api/ready", endpoint([](const httplib::Request& req) {
         json body = bodyOf(req);
-        requireWaitingRoom();
-        game.lobby.setReady(memberOf(req).name, booleanField(body, "ready"));
-        if (game.lobby.canStart()) {
-            game.match = make_unique<Match>(game.lobby, game.characters);
-        }
-        json answer = memberJson(memberOf(req));
-        answer["started"] = game.match != nullptr;
+        Visitor in = visitorOf(req);
+        in.room.setReady(in.token, booleanField(body, "ready"));      // the match starts when everybody is ready
+        json answer = memberJson(in.room.member(in.token));
+        answer["started"] = in.room.started();
         return answer;
     }));
 
+    // ---- the match
+
     server.Get("/api/state", endpoint([](const httplib::Request& req) {
-        const Member& you = memberOf(req);
-        json answer = {{"started", game.match != nullptr}, {"you", memberJson(you)}};
-        if (game.match) {
-            Match& match = startedMatch();                // brings the clock up to date first
+        Visitor in = visitorOf(req);
+        const Member& you = in.you;
+        json answer = {{"room", in.room.code()}, {"started", in.room.started()}, {"you", memberJson(you)}};
+        if (in.room.started()) {
+            Match& match = in.room.match();               // brings the clock up to date first
             answer["finished"] = match.isFinished();
             // The countdown of the phase the turn is in: giving the clue, or guessing after it.
             answer["timer"] = {{"phase", match.hasClue() ? "GUESS" : "CLUE"}, {"enabled", match.hasTimeLimit()},
@@ -387,10 +328,10 @@ int main(int argc, char* argv[]) {
     }));
 
     server.Get("/api/board", endpoint([](const httplib::Request& req) {
-        const Member& you = memberOf(req);
+        Visitor in = visitorOf(req);
         json cards = json::array();
         int index = 0;
-        for (const CardView& card : startedMatch().viewFor(you.name)) {
+        for (const CardView& card : in.room.match().viewFor(in.you.name)) {
             cards.push_back({{"index", index++}, {"name", card.characterName}, {"image", card.image},
                              {"key", toString(card.key)}, {"state", toString(card.state)}});
         }
@@ -398,7 +339,7 @@ int main(int argc, char* argv[]) {
     }));
 
     server.Post("/api/clue", endpoint([](const httplib::Request& req) {
-        const Member& you = memberOf(req);
+        Visitor in = visitorOf(req);
         json body = bodyOf(req);
         string text = textField(body, "text");
         if (!body.contains("number") || !body["number"].is_number_integer()) {
@@ -408,12 +349,12 @@ int main(int argc, char* argv[]) {
         if (number < 1 || number > 25) {
             throw HttpError(400, "The number must be from 1 to the cards your team still has to find");
         }
-        startedMatch().giveClue(you.name, text, (int)number);
+        in.room.match().giveClue(in.you.name, text, (int)number);
         return json{{"ok", true}};
     }));
 
     server.Post("/api/guess", endpoint([](const httplib::Request& req) {
-        const Member& you = memberOf(req);
+        Visitor in = visitorOf(req);
         json body = bodyOf(req);
         if (!body.contains("index") || !body["index"].is_number_integer()) {
             throw HttpError(400, "Missing whole-number field: index");
@@ -422,17 +363,19 @@ int main(int argc, char* argv[]) {
         if (index < 0 || index > 24) {
             throw HttpError(400, "The card must be between 0 and 24");
         }
-        CardKey key = startedMatch().guess(you.name, (int)index);
+        CardKey key = in.room.match().guess(in.you.name, (int)index);
         return json{{"key", toString(key)}};
     }));
 
     server.Post("/api/end-turn", endpoint([](const httplib::Request& req) {
-        startedMatch().endTurn(memberOf(req).name);
+        Visitor in = visitorOf(req);
+        in.room.match().endTurn(in.you.name);
         return json{{"ok", true}};
     }));
 
     server.Post("/api/forfeit", endpoint([](const httplib::Request& req) {
-        startedMatch().forfeit(memberOf(req).name);
+        Visitor in = visitorOf(req);
+        in.room.match().forfeit(in.you.name);
         return json{{"ok", true}};
     }));
 
