@@ -44,6 +44,14 @@ build/server    # start the server on http://127.0.0.1:8080
 10. **Leave the room** takes you back to the start page. During a match you are asked first: your team goes on without you, unless you were its last spy or its last guesser, and then it forfeits. After the match leaving is free. When the last player has left, the room is deleted; make a new one to play again.
 11. The black card loses the game for the team that reveals it. The first team to reveal all its cards wins. Every card that is picked turns over on every player's screen.
 
+### Joining a game in progress
+
+A new player can enter a room (with its code or invite link) while the match is going on, as long as the room has fewer than 10 players and the match is not over. They type their name as usual and land on a **Join the game in progress** page, where they pick a team and a role once; nobody else is interrupted. That seat is final until the end of the game, and until they pick it they cannot play (and they do not see the board). Joining a game does not cancel anybody's ready or touch the clocks.
+
+- The number of players does not change the kind of game: a game that started co-operative stays co-operative, and a newcomer there is always on the Blue team, whatever team they click (they only choose the role).
+- A newcomer who picks a spy sees every colour, so a team may want to agree on who takes that role.
+- Somebody who left can come back with the same name and picks a new seat.
+
 ### Co-operative game (2 or 3 players)
 
 With fewer than 4 players there is no opposing team. When the game starts, an alert says *"Your game only contains two people. This will be a co-operative game."* and you press **OK**.

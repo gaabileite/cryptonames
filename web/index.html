@@ -82,6 +82,17 @@
             <p id="wait-error" class="error" role="alert" hidden></p>
         </section>
 
+        <!-- Somebody who came into a match that is already going on: pick a team and a role to join it -->
+        <section id="screen-late" hidden>
+            <h2>Join the game in progress</h2>
+            <p id="late-intro" class="note"></p>
+            <div id="late-teams" class="teams"></div>
+            <p id="late-error" class="error" role="alert" hidden></p>
+            <div class="wait-actions">
+                <button id="late-leave" type="button" class="link">Leave the room</button>
+            </div>
+        </section>
+
         <!-- Game -->
         <section id="screen-game" hidden>
             <div id="banner" class="banner"></div>

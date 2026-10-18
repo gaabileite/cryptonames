@@ -1,5 +1,6 @@
 // Front-end of CryptoNames. Talks to the JSON API of the server (see src/server/server.cpp).
-// Three screens: join (just a name), wait (pick a team and a role, then press ready) and game (board + end-turn button).
+// Four screens: join (just a name), wait (pick a team and a role, then press ready), game (board + end-turn button)
+// and late (somebody who came into a match that is already going on picks a team and a role to join it).
 // A game has from 2 to 10 players, and any number of them can share a team and a role. With fewer than 4 players the
 // game is co-operative: everybody is on the Blue team (the server decides the roles) and an alert says so.
 // The page asks the server for the state every POLL_MS; everything the player sees comes from the server.
@@ -15,7 +16,7 @@
     const NAMES = { BLUE: 'Blue', RED: 'Red', SPY: 'Spy', GUESSER: 'Guesser', BEIGE: 'Beige', BLACK: 'Black' };
 
     const $ = (id) => document.getElementById(id);
-    const screens = { join: $('screen-join'), wait: $('screen-wait'), game: $('screen-game') };
+    const screens = { join: $('screen-join'), wait: $('screen-wait'), late: $('screen-late'), game: $('screen-game') };
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
     // ---------- Token (kept so a page refresh does not lose the seat) ----------
@@ -195,9 +196,10 @@
 
     // ---------- Waiting room: pick a team and a role, then press ready ----------
 
-    const slots = {};     // 'BLUE|SPY' -> { button, who }
-    const teamCards = {}; // 'BLUE' -> { card, title }
-    (function buildTeams() {
+    // The two team cards with a button for each role, used by the waiting room and by the screen of a late player.
+    // Returns { slots: 'BLUE|SPY' -> { button, who }, teamCards: 'BLUE' -> { card, title } }.
+    function buildTeamCards(container) {
+        const slots = {}, teamCards = {};
         for (const team of TEAMS) {
             const card = document.createElement('div');
             card.className = `team-card team-${team}`;
@@ -220,9 +222,35 @@
                 card.append(button);
                 slots[`${team}|${role}`] = { button, who };
             }
-            $('teams').append(card);
+            container.append(card);
         }
-    })();
+        return { slots, teamCards };
+    }
+
+    // Who sits where: any number of players can take the same seat. In a co-operative game everybody is on the Blue
+    // team, so the team a player picked does not matter and only the roles are shown.
+    function paintSeats(ui, players, coop, you, options) {
+        const occupants = {};
+        for (const player of players) {
+            if (!player.team) continue;
+            const key = `${coop ? 'BLUE' : player.team}|${player.role}`;
+            (occupants[key] = occupants[key] || []).push(player);
+        }
+        ui.teamCards.RED.card.hidden = coop;
+        ui.teamCards.BLUE.title.textContent = coop ? 'Co-operative team' : `${NAMES.BLUE} team`;
+        for (const key of Object.keys(ui.slots)) {
+            const { button, who } = ui.slots[key];
+            const here = occupants[key] || [];
+            const mine = here.some((player) => player.name === you.name);
+            button.classList.toggle('mine', mine);
+            button.setAttribute('aria-pressed', mine ? 'true' : 'false');
+            who.textContent = here.length === 0 ? 'Nobody yet'
+                : here.map((player) => `${player.name}${player.name === you.name ? ' (you)' : ''}${options.showReady && player.ready ? ' ✓' : ''}`).join(', ');
+            button.disabled = options.locked;
+        }
+    }
+
+    const waitSeats = buildTeamCards($('teams'));
 
     // The invite link opens the start page with the code already typed.
     $('copy-code').addEventListener('click', async () => {
@@ -387,26 +415,7 @@
         const unseated = players.filter((player) => !player.team);
         const coop = lobby.cooperative;
 
-        // Who sits where: any number of players can take the same seat. In a co-operative game everybody is on the
-        // Blue team, so the team they picked does not matter and only the roles are shown.
-        const occupants = {};
-        for (const player of players) {
-            if (!player.team) continue;
-            const key = `${coop ? 'BLUE' : player.team}|${player.role}`;
-            (occupants[key] = occupants[key] || []).push(player);
-        }
-        teamCards.RED.card.hidden = coop;
-        teamCards.BLUE.title.textContent = coop ? 'Co-operative team' : `${NAMES.BLUE} team`;
-        for (const key of Object.keys(slots)) {
-            const { button, who } = slots[key];
-            const here = occupants[key] || [];
-            const mine = here.some((player) => player.name === you.name);
-            button.classList.toggle('mine', mine);
-            button.setAttribute('aria-pressed', mine ? 'true' : 'false');
-            who.textContent = here.length === 0 ? 'Nobody yet'
-                : here.map((player) => `${player.name}${player.name === you.name ? ' (you)' : ''}${player.ready ? ' ✓' : ''}`).join(', ');
-            button.disabled = you.ready;          // locked while I am ready
-        }
+        paintSeats(waitSeats, players, coop, you, { showReady: true, locked: you.ready });      // locked while I am ready
 
         // Status line
         let status;
@@ -482,6 +491,48 @@
     $('universe-list').addEventListener('change', (event) => {
         const input = event.target;
         waitAction(() => api('POST', '/api/universes', { universe: input.value, selected: input.checked })).catch(() => {});
+    });
+
+    // ---------- Joining a match that is already going on ----------
+
+    // The seat is final: the server only accepts it once, and then the player is in the game.
+    const lateSeats = buildTeamCards($('late-teams'));
+
+    function renderLate(lobby, state) {
+        show('late');
+        renderWhoAmI(state.you);
+        if (!changed('late', { lobby, you: state.you, cooperative: state.cooperative })) return;
+        const coop = state.cooperative;
+        $('late-intro').textContent = coop
+            ? 'A co-operative game is in progress. Everybody plays on the Blue team: pick the role you want to take. You cannot change it during this game.'
+            : 'A game is in progress. Pick the team and the role you want to take. You cannot change them during this game.';
+        paintSeats(lateSeats, lobby.players, coop, state.you, { showReady: false, locked: false });
+    }
+
+    $('late-teams').addEventListener('click', async (event) => {
+        const button = event.target.closest('button.slot');
+        if (!button || button.disabled || busy) return;
+        busy = true;
+        showError('late-error', '');
+        try {
+            await api('POST', '/api/seat', { team: button.dataset.team, role: button.dataset.role });
+        } catch (error) {
+            if (error.status !== 401) showError('late-error', error.message);
+        } finally {
+            busy = false;
+            delete lastRendered.late;
+            refreshPlay().catch(() => {});
+        }
+    });
+
+    $('late-leave').addEventListener('click', async () => {
+        try {
+            await api('POST', '/api/leave');
+        } catch (error) {
+            if (error.status !== 401) return showError('late-error', error.message);
+        }
+        forgetSeat();
+        goToStart();
     });
 
     // ---------- Game screen ----------
@@ -924,6 +975,10 @@
         if (!state.started) {
             renderWhoAmI(state.you);
             renderWait(await api('GET', '/api/lobby'), state.you);
+            return;
+        }
+        if (!state.you.team) {
+            renderLate(await api('GET', '/api/lobby'), state);        // came in during the match: no seat yet
             return;
         }
         renderGame(state, await api('GET', '/api/board'));

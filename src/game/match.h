@@ -25,6 +25,7 @@ struct CardView {
 //   endTurn(name)         -> the current team's GUESSER stops guessing
 //   forfeit(name)         -> a team gives up: any of its players, at any time, and the other team wins
 //   playerLeft(name)      -> a player left the room: their team goes on, unless it is left without a spy or a guesser
+//   addPlayer(name, team, role) -> a player who came into the room after the start takes a seat (co-operative: always BLUE)
 //   advanceClock()        -> with a time limit, passes the turn when the time of a turn has run out
 // Anything not allowed throws invalid_argument with a message that can be shown to the player.
 //
@@ -389,9 +390,34 @@ class Match {
             finish(opposite(player.team));
         }
 
+        // How many players are in the match right now (not counting those who left).
+        int playing() const {
+            return (int)participants.size() - (int)departed.size();
+        }
+
         // Would the team of this player have to give up if they left now?
         bool leavingForfeits(const string& name) const {
             return !isFinished() && !teamKeepsPlaying(findPlayer(name));
+        }
+
+        // A player who came into the room after the match started takes a seat, and keeps it until the end. In a
+        // co-operative game the team is always BLUE, whatever they ask for. Returns the seat they got. A player who left
+        // earlier can come back with the same name: their old seat is forgotten.
+        Player addPlayer(const string& name, Team team, Role role) {
+            if (isFinished()) {
+                throw invalid_argument("The match is already over");
+            }
+            for (size_t i = 0; i < participants.size(); i++) {
+                if (participants[i].name != name) continue;
+                if (!departed.count(name)) {
+                    throw invalid_argument("There is already a player named " + name);
+                }
+                departed.erase(name);
+                participants.erase(participants.begin() + i);
+                break;
+            }
+            participants.push_back(Player(name, coop ? Team::BLUE : team, role));
+            return participants.back();
         }
 
         // The player left the room. Their team goes on without them, unless it has no spy or no guesser left: then it

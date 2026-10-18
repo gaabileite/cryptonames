@@ -45,7 +45,8 @@ struct WrongStage : runtime_error {
 };
 
 // One room: a waiting room (Lobby) that turns into a Match, and the players that are in it.
-// A player enters with join(), which gives a secret token that identifies them from then on.
+// A player enters with join(), which gives a secret token that identifies them from then on. That is also possible
+// while the match is going on: the newcomer picks a seat once (chooseSeat), and from then on plays like the others.
 // No input/output here, so any interface can drive it. Not thread safe: whoever shares a Room between threads locks it.
 // Anything not allowed throws invalid_argument (a rule), WrongStage (not at this moment) or NotInRoom (unknown token).
 class Room {
@@ -87,9 +88,12 @@ class Room {
 
         // ---- who is in the room
 
-        // Enters the waiting room and returns the player's secret token.
+        // Enters the room and returns the player's secret token. Before the start the player is in the waiting room;
+        // during the match they have no seat until they pick one. Nobody can enter a match that is over.
         string join(const string& name) {
-            requireWaitingRoom();
+            if (currentMatch && currentMatch->isFinished()) {
+                throw WrongStage("The match is over, so nobody can join it");
+            }
             lobby.join(name);                     // throws if the name is not allowed or the room is full
             string token = newToken();
             nameOfToken[token] = lobby.members().back().name;      // the lobby may have trimmed the name
@@ -110,8 +114,9 @@ class Room {
         // Leaves the room, at any stage. Leaving a match that is still going on makes the player's team forfeit, unless it
         // still has a spy and a guesser without them.
         void leave(const string& token) {
-            string name = member(token).name;
-            if (currentMatch) {
+            const Member& leaving = member(token);
+            string name = leaving.name;
+            if (currentMatch && leaving.seat) {           // somebody who never took a seat was not playing
                 currentMatch->playerLeft(name);
             }
             lobby.leave(name);
@@ -127,9 +132,22 @@ class Room {
 
         // ---- the waiting room
 
+        // In the waiting room the seat can be changed until the player is ready. A player who came in during the match
+        // has no seat yet and takes one, once: it is theirs until the end.
         void chooseSeat(const string& token, Team team, Role role) {
-            requireWaitingRoom();
-            lobby.chooseSeat(member(token).name, team, role);
+            const Member& chooser = member(token);
+            if (!currentMatch) {
+                lobby.chooseSeat(chooser.name, team, role);
+                return;
+            }
+            if (currentMatch->isFinished()) {
+                throw WrongStage("The match is over");
+            }
+            if (chooser.seat) {
+                throw WrongStage("The game has already started, so your team and role cannot change");
+            }
+            Player seat = currentMatch->addPlayer(chooser.name, team, role);
+            lobby.chooseSeat(chooser.name, seat.team, seat.role);      // the same seat as the match gave (co-operative: BLUE)
         }
 
         // Marks the player as ready, or not. The match starts by itself when everybody is ready and nothing is missing.

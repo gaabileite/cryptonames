@@ -11,13 +11,16 @@
 // Entering:
 //   POST /api/rooms/create  {"name"} makes a room and puts you in it -> {"code", "token", ...}
 //   POST /api/rooms/join    {"code", "name"} -> {"code", "token", ...}          404 if there is no such room
+//                           Also works while a match is going on (not after it): the newcomer has no team and no role
+//                           until they pick them with /api/seat, once, and cannot play before that.
 // Waiting room (until every seat is taken and everybody is ready, then the match starts by itself):
 //   GET  /api/lobby      the room code, who is in the waiting room (team and role are null until picked, plus "ready"),
 //                        how many players a game takes (2 to 10), whether the game would be co-operative (fewer than 4
 //                        players), what is "missing" before a match could start (null when nothing), the universes
 //                        with their character count and whether they are selected, and the time limits   (X-Token)
 //   POST /api/seat       {"team", "role"} picks or changes your seat; any number of players can take the same one;
-//                        not while ready                                                   (X-Token)
+//                        not while ready. During a match only a newcomer without a seat can use it, once (in a
+//                        co-operative game the answer shows the team they really got: BLUE)   (X-Token)
 //   POST /api/universes  {"universe": "MCU", "selected": true|false} switches one universe on or off; cancels everybody's ready (X-Token)
 //   POST /api/timer      {"phase": "clue"|"guess", "enabled": true|false, "seconds": 15-600} the time limit of the clue or
 //                        of the guessing; cancels everybody's ready                       (X-Token)
@@ -305,8 +308,8 @@ int main(int argc, char* argv[]) {
             Match& match = in.room.match();               // brings the clock up to date first
             answer["finished"] = match.isFinished();
             answer["cooperative"] = match.isCooperative();
-            answer["playerCount"] = match.players().size();
-            answer["leavingForfeits"] = match.leavingForfeits(you.name);
+            answer["playerCount"] = match.playing();
+            answer["leavingForfeits"] = you.seat && match.leavingForfeits(you.name);     // a newcomer without a seat plays for nobody
             // The countdown of the phase the turn is in: giving the clue, or guessing after it.
             answer["timer"] = {{"phase", match.hasClue() ? "GUESS" : "CLUE"}, {"enabled", match.hasTimeLimit()},
                                {"seconds", match.phaseLimitSeconds()},
@@ -314,7 +317,7 @@ int main(int argc, char* argv[]) {
                                {"clueSeconds", match.clueLimitSeconds()}, {"guessSeconds", match.guessLimitSeconds()}};
             answer["currentTeam"] = toString(match.currentTeam());
             answer["remaining"] = {{"BLUE", match.remaining(Team::BLUE)}, {"RED", match.remaining(Team::RED)}};
-            bool onTurn = !match.isFinished() && you.seat->first == match.currentTeam();
+            bool onTurn = you.seat && !match.isFinished() && you.seat->first == match.currentTeam();
             answer["yourTurn"] = onTurn && you.seat->second == Role::GUESSER;                       // the guesser of the team on turn
             answer["canGiveClue"] = onTurn && you.seat->second == Role::SPY && !match.hasClue();
             answer["canGuess"] = onTurn && you.seat->second == Role::GUESSER && match.hasClue();
@@ -338,6 +341,9 @@ int main(int argc, char* argv[]) {
 
     server.Get("/api/board", endpoint([](const httplib::Request& req) {
         Visitor in = visitorOf(req);
+        if (in.room.started() && !in.you.seat) {
+            throw HttpError(409, "Pick a team and a role to join the game first");
+        }
         json cards = json::array();
         int index = 0;
         for (const CardView& card : in.room.match().viewFor(in.you.name)) {

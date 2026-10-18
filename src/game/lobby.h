@@ -86,7 +86,7 @@ class Lobby {
                 }
             }
             if (isFull()) {
-                throw invalid_argument("The waiting room is full: a game has at most " + to_string(maxPlayers) + " players");
+                throw invalid_argument("The room is full: a game has at most " + to_string(maxPlayers) + " players");
             }
             return name;
         }

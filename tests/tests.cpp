@@ -797,7 +797,6 @@ void testRoomMatch() {
         CHECK(!room.started());                                              // one is not ready
         room.setReady(t["rg"], true);
         CHECK(room.started());
-        CHECK(throwsType<WrongStage>([&] { room.join("late"); }));
         CHECK(throwsType<WrongStage>([&] { room.chooseSeat(t["bs"], Team::RED, Role::SPY); }));
         CHECK(throwsType<WrongStage>([&] { room.setReady(t["bs"], false); }));
         CHECK(throwsType<WrongStage>([&] { room.setUniverse(t["bs"], M_Universe::MCU, false); }));
@@ -809,6 +808,81 @@ void testRoomMatch() {
         match.giveClue(room.member(t[spy]).name, "HELLO", 1);
         vector<int> mine = cardsWithKey(match, spy, keyOf(team));
         CHECK(match.guess(room.member(t[guesser]).name, mine[0]) == keyOf(team));
+    }
+    {   // somebody can join while the match is going on: no seat at first, then one seat, once
+        Room room("LATE1", catalog);
+        map<string, string> t = fillRoom(room);
+        Match& match = room.match();
+        CHECK(match.playing() == 4);
+        string late = room.join("late");
+        CHECK(room.started() && !room.member(late).seat && match.playing() == 4);          // in the room, not playing yet
+        CHECK(rejects([&] { room.join("late"); }));                                         // names are still unique
+        CHECK(rejects([&] { match.viewFor("late"); }));                                     // no board before taking a seat
+        CHECK(rejects([&] { match.giveClue("late", "NOPE", 1); }));
+        CHECK(throwsType<WrongStage>([&] { room.setReady(late, true); }));
+        CHECK(throwsType<WrongStage>([&] { room.setUniverse(late, M_Universe::MCU, false); }));
+        CHECK(throwsType<WrongStage>([&] { room.setTimer(late, TimerPhase::CLUE, true, 30); }));
+        room.chooseSeat(late, Team::RED, Role::GUESSER);
+        CHECK(*room.member(late).seat == Slot(Team::RED, Role::GUESSER) && match.playing() == 5);
+        CHECK(match.players().back().name == "late" && match.players().back().team == Team::RED);
+        CHECK(match.viewFor("late").size() == 25 && match.viewFor("late")[0].key == CardKey::BEIGE);      // a guesser sees beige
+        CHECK(throwsType<WrongStage>([&] { room.chooseSeat(late, Team::BLUE, Role::SPY); }));         // the seat is final
+        CHECK(throwsType<WrongStage>([&] { room.chooseSeat(t["bs"], Team::RED, Role::SPY); }));       // so is everybody else's
+        // the newcomer plays: a second red guesser, on red's turn
+        Team team = match.currentTeam();
+        if (team == Team::BLUE) {
+            match.giveClue("bs", "BLUE", 1);
+            match.endTurn("bg");
+        }
+        match.giveClue("rs", "LATE", 2);
+        vector<int> mine = cardsWithKey(match, "rs", CardKey::RED);
+        CHECK(match.guess("late", mine[0]) == CardKey::RED);
+        CHECK(match.leavingForfeits("rg") == false && match.leavingForfeits("late") == false);         // red has two guessers now
+        room.leave(t["rg"]);
+        CHECK(!match.isFinished());                                                          // red goes on with the newcomer
+        room.leave(late);
+        CHECK(match.isFinished() && match.forfeitedBy() == Team::RED);                       // now it has no guesser
+        CHECK(throwsType<WrongStage>([&] { room.join("too late"); }));                      // nobody joins a finished match
+    }
+    {   // a newcomer who never takes a seat can leave without any effect; the room can fill up to 10
+        Room room("LATE2", catalog);
+        map<string, string> t = fillRoom(room);
+        string idle = room.join("idle");
+        room.leave(idle);
+        CHECK(!room.match().isFinished() && throwsType<NotInRoom>([&] { room.member(idle); }));
+        for (int i = 0; i < Lobby::maxPlayers - 4; i++) room.join("n" + to_string(i));
+        CHECK(rejects([&] { room.join("one too many"); }));
+    }
+    {   // a co-operative game stays co-operative: newcomers are on BLUE, whatever they ask for, even when they make 4
+        Room room("LATE3", catalog);
+        string ana = room.join("Ana"), bia = room.join("Bia");
+        room.chooseSeat(ana, Team::BLUE, Role::SPY);
+        room.chooseSeat(bia, Team::BLUE, Role::GUESSER);
+        room.setReady(ana, true); room.setReady(bia, true);
+        CHECK(room.match().isCooperative());
+        string cris = room.join("Cris"), dani = room.join("Dani");
+        room.chooseSeat(cris, Team::RED, Role::SPY);
+        room.chooseSeat(dani, Team::RED, Role::GUESSER);
+        CHECK(*room.member(cris).seat == Slot(Team::BLUE, Role::SPY) && *room.member(dani).seat == Slot(Team::BLUE, Role::GUESSER));
+        Match& match = room.match();
+        CHECK(match.isCooperative() && match.playing() == 4 && match.currentTeam() == Team::BLUE);
+        match.giveClue("Cris", "TWO SPIES", 1);                                              // any spy gives the clue
+        CHECK(match.guess("Dani", cardsWithKey(match, "Ana", CardKey::BLUE)[0]) == CardKey::BLUE);    // any guesser guesses
+    }
+    {   // somebody who left can come back with the same name, and gets a new seat
+        Room room("LATE4", catalog);
+        map<string, string> t = fillRoom(room);
+        Match& match = room.match();
+        string extra = room.join("extra");
+        room.chooseSeat(extra, Team::BLUE, Role::GUESSER);
+        room.leave(extra);
+        CHECK(match.playing() == 4 && !match.isFinished());
+        string back = room.join("extra");
+        room.chooseSeat(back, Team::RED, Role::SPY);
+        CHECK(match.playing() == 5 && match.players().back().name == "extra" && match.players().back().team == Team::RED && match.players().back().role == Role::SPY);
+        int named = 0;
+        for (const Player& player : match.players()) named += player.name == "extra";
+        CHECK(named == 1);
     }
     {   // the match only draws from the chosen universes
         Room room("ROOM2", catalog);
