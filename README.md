@@ -17,7 +17,7 @@ A spy game played on a 5x5 grid of Marvel character cards, with 2 to 10 players.
 | `assets/brand/` | The original logo and wordmark of CryptoNames. The web-sized versions and the favicons are in `web/brand/`. |
 | `assets/images/` | The four coloured cards of each character: `<universe>/<character>/{blue,red,beige,black}.png`. |
 | `third_party/` | Single-header libraries: cpp-httplib and nlohmann/json (both MIT). |
-| `web/` | The front-end (plain HTML, CSS and JavaScript), served at `/` by the server. |
+| `web/` | The front-end (plain HTML, CSS and JavaScript), served at `/` by the server. `web/fonts/` has the game's font, Chakra Petch (SIL Open Font License, `OFL.txt` next to it), subset to Latin letters and kept in the repo so the game needs no internet. |
 
 ## Build and run
 
