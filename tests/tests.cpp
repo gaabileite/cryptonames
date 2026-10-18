@@ -814,9 +814,11 @@ void testRoomMatch() {
         map<string, string> t = fillRoom(room);
         Match& match = room.match();
         CHECK(match.playing() == 4);
-        string late = room.join("late");
-        CHECK(room.started() && !room.member(late).seat && match.playing() == 4);          // in the room, not playing yet
-        CHECK(rejects([&] { room.join("late"); }));                                         // names are still unique
+        CHECK(throwsType<MatchInProgress>([&] { room.join("late"); }));                     // they have to say what they want
+        CHECK(throwsType<WrongStage>([&] { room.join("late"); }) && room.waitingRoom().members().size() == 4);   // and nobody got in
+        string late = room.join("late", JoinChoice::PLAY);
+        CHECK(room.started() && !room.member(late).seat && !room.member(late).waiting && match.playing() == 4);   // in the room, not playing yet
+        CHECK(rejects([&] { room.join("late", JoinChoice::PLAY); }));                       // names are still unique
         CHECK(rejects([&] { match.viewFor("late"); }));                                     // no board before taking a seat
         CHECK(rejects([&] { match.giveClue("late", "NOPE", 1); }));
         CHECK(throwsType<WrongStage>([&] { room.setReady(late, true); }));
@@ -842,16 +844,17 @@ void testRoomMatch() {
         CHECK(!match.isFinished());                                                          // red goes on with the newcomer
         room.leave(late);
         CHECK(match.isFinished() && match.forfeitedBy() == Team::RED);                       // now it has no guesser
-        CHECK(throwsType<WrongStage>([&] { room.join("too late"); }));                      // nobody joins a finished match
+        string after = room.join("after");                                                  // a finished match has nothing to join:
+        CHECK(room.member(after).waiting && !room.member(after).seat);                      // they just wait for the next game
     }
     {   // a newcomer who never takes a seat can leave without any effect; the room can fill up to 10
         Room room("LATE2", catalog);
         map<string, string> t = fillRoom(room);
-        string idle = room.join("idle");
+        string idle = room.join("idle", JoinChoice::PLAY);
         room.leave(idle);
         CHECK(!room.match().isFinished() && throwsType<NotInRoom>([&] { room.member(idle); }));
-        for (int i = 0; i < Lobby::maxPlayers - 4; i++) room.join("n" + to_string(i));
-        CHECK(rejects([&] { room.join("one too many"); }));
+        for (int i = 0; i < Lobby::maxPlayers - 4; i++) room.join("n" + to_string(i), i % 2 ? JoinChoice::PLAY : JoinChoice::WAIT);
+        CHECK(rejects([&] { room.join("one too many", JoinChoice::PLAY); }));
     }
     {   // a co-operative game stays co-operative: newcomers are on BLUE, whatever they ask for, even when they make 4
         Room room("LATE3", catalog);
@@ -860,7 +863,7 @@ void testRoomMatch() {
         room.chooseSeat(bia, Team::BLUE, Role::GUESSER);
         room.setReady(ana, true); room.setReady(bia, true);
         CHECK(room.match().isCooperative());
-        string cris = room.join("Cris"), dani = room.join("Dani");
+        string cris = room.join("Cris", JoinChoice::PLAY), dani = room.join("Dani", JoinChoice::PLAY);
         room.chooseSeat(cris, Team::RED, Role::SPY);
         room.chooseSeat(dani, Team::RED, Role::GUESSER);
         CHECK(*room.member(cris).seat == Slot(Team::BLUE, Role::SPY) && *room.member(dani).seat == Slot(Team::BLUE, Role::GUESSER));
@@ -873,16 +876,70 @@ void testRoomMatch() {
         Room room("LATE4", catalog);
         map<string, string> t = fillRoom(room);
         Match& match = room.match();
-        string extra = room.join("extra");
+        string extra = room.join("extra", JoinChoice::PLAY);
         room.chooseSeat(extra, Team::BLUE, Role::GUESSER);
         room.leave(extra);
         CHECK(match.playing() == 4 && !match.isFinished());
-        string back = room.join("extra");
+        string back = room.join("extra", JoinChoice::PLAY);
         room.chooseSeat(back, Team::RED, Role::SPY);
         CHECK(match.playing() == 5 && match.players().back().name == "extra" && match.players().back().team == Team::RED && match.players().back().role == Role::SPY);
         int named = 0;
         for (const Player& player : match.players()) named += player.name == "extra";
         CHECK(named == 1);
+    }
+    {   // somebody who chooses to wait stays in the room's waiting room: no seat, and nobody asks them for one
+        Room room("WAIT1", catalog);
+        map<string, string> t = fillRoom(room);
+        Match& match = room.match();
+        string waiter = room.join("waiter", JoinChoice::WAIT);
+        CHECK(room.member(waiter).waiting && !room.member(waiter).seat && match.playing() == 4);
+        CHECK(throwsType<WrongStage>([&] { room.chooseSeat(waiter, Team::BLUE, Role::SPY); }));       // they have to join first
+        CHECK(rejects([&] { match.viewFor("waiter"); }));
+        CHECK(throwsType<WrongStage>([&] { room.newGame(waiter); }));                       // the game is not over yet
+        CHECK(throwsType<WrongStage>([&] { room.newGame(t["bs"]); }));
+        room.setWaiting(waiter, false);                                                      // they change their mind: join it
+        CHECK(!room.member(waiter).waiting);
+        room.chooseSeat(waiter, Team::BLUE, Role::GUESSER);
+        CHECK(match.playing() == 5);
+        CHECK(throwsType<WrongStage>([&] { room.setWaiting(waiter, true); }));               // already playing
+        CHECK(throwsType<WrongStage>([&] { room.setWaiting(t["bs"], true); }));
+        string another = room.join("another", JoinChoice::PLAY);
+        room.setWaiting(another, true);                                                      // or the other way round
+        CHECK(room.member(another).waiting);
+        CHECK(throwsType<NotInRoom>([&] { room.setWaiting("not a token", true); }));
+        room.leave(another);
+        CHECK(throwsType<NotInRoom>([&] { room.setWaiting(another, true); }));
+    }
+    {   // a new game in the same room: everybody, players and waiters, is back in the waiting room
+        Room room("AGAIN1", catalog);
+        CHECK(room.gameNumber() == 0);
+        CHECK(throwsType<NotInRoom>([&] { room.newGame("nope"); }));
+        map<string, string> t = fillRoom(room);
+        CHECK(room.gameNumber() == 1);
+        string waiter = room.join("waiter", JoinChoice::WAIT);
+        room.match().forfeit("bs");                                                          // the match is over
+        string lateWaiter = room.join("lateWaiter");                                         // nothing to join: just wait
+        CHECK(room.member(lateWaiter).waiting);
+        CHECK(throwsType<WrongStage>([&] { room.setWaiting(waiter, false); }));              // the match is over
+        CHECK(throwsType<WrongStage>([&] { room.chooseSeat(waiter, Team::BLUE, Role::SPY); }));
+        room.newGame(waiter);                                                                // a waiter can open the waiting room
+        CHECK(!room.started() && room.waitingRoom().members().size() == 6);
+        for (const Member& member : room.waitingRoom().members()) CHECK(!member.seat && !member.ready && !member.waiting);
+        CHECK(room.member(t["bs"]).name == "bs");                                            // the same tokens still work
+        CHECK(throwsType<WrongStage>([&] { room.newGame(t["bs"]); }));                       // there is no match to end
+        CHECK(throwsType<WrongStage>([&] { room.match(); }));
+        CHECK(throwsType<WrongStage>([&] { room.setWaiting(waiter, true); }));
+        // a normal waiting room again: the joiners are asked for nothing, and the settings are kept
+        string newcomer = room.join("newcomer");
+        CHECK(!room.member(newcomer).waiting);
+        room.leave(newcomer); room.leave(lateWaiter); room.leave(waiter);
+        Team teams[4] = {Team::BLUE, Team::BLUE, Team::RED, Team::RED};
+        Role roles[4] = {Role::SPY, Role::GUESSER, Role::SPY, Role::GUESSER};
+        const char* names[4] = {"bs", "bg", "rs", "rg"};
+        for (int i = 0; i < 4; i++) room.chooseSeat(t[names[i]], teams[i], roles[i]);
+        for (int i = 0; i < 4; i++) room.setReady(t[names[i]], true);
+        CHECK(room.started() && room.gameNumber() == 2 && !room.match().isFinished());
+        CHECK(room.match().remaining(Team::BLUE) == 8 && room.match().clueHistory().empty());   // a brand new match
     }
     {   // the match only draws from the chosen universes
         Room room("ROOM2", catalog);
@@ -1023,6 +1080,26 @@ void testRoomRegistry() {
         CHECK(ma.isFinished() && !mb.isFinished());
         // each token leads to its own room
         CHECK(&rooms.roomOf(ta["rg"]) == a.room && &rooms.roomOf(tb["rg"]) == b.room);
+    }
+    {   // joining a room whose match is going on: the registry passes the choice on, and without one nobody gets in
+        RoomRegistry rooms(catalog);
+        RoomRegistry::Entry host = rooms.create("bs");
+        map<string, string> t; t["bs"] = host.token;
+        for (string name : {"bg", "rs", "rg"}) t[name] = rooms.join(host.room->code(), name).token;
+        const Team teams[3] = {Team::BLUE, Team::RED, Team::RED};
+        const Role roles[3] = {Role::GUESSER, Role::SPY, Role::GUESSER};
+        rooms.roomOf(t["bs"]).chooseSeat(t["bs"], Team::BLUE, Role::SPY);
+        int i = 0; for (string name : {"bg", "rs", "rg"}) { rooms.roomOf(t[name]).chooseSeat(t[name], teams[i], roles[i]); i++; }
+        for (string name : {"bs", "bg", "rs", "rg"}) rooms.roomOf(t[name]).setReady(t[name], true);
+        const string code = host.room->code();
+        CHECK(host.room->started());
+        CHECK(throwsType<MatchInProgress>([&] { rooms.join(code, "late"); }));
+        CHECK(host.room->waitingRoom().members().size() == 4);                   // nobody was let in, and no token was kept
+        RoomRegistry::Entry player = rooms.join(code, "player", Clock::now(), JoinChoice::PLAY);
+        RoomRegistry::Entry waiter = rooms.join(code, "waiter", Clock::now(), JoinChoice::WAIT);
+        CHECK(!player.room->member(player.token).waiting && waiter.room->member(waiter.token).waiting);
+        CHECK(&rooms.roomOf(waiter.token) == host.room);
+        CHECK(throwsType<NoSuchRoom>([&] { rooms.join("00000", "x", Clock::now(), JoinChoice::PLAY); }));
     }
     {   // a room disappears when its last player leaves
         RoomRegistry rooms(catalog);

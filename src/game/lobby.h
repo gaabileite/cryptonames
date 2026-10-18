@@ -24,10 +24,13 @@ struct TimeLimit {
 enum class TimerPhase { CLUE, GUESS };
 
 // Someone in the waiting room. The seat stays empty until they pick a team and a role.
+// `waiting` is for somebody who came into a room while a match was going on and chose to wait for the next game
+// instead of joining it (see Room): they have no seat and are not asked to pick one.
 struct Member {
     string name;
     optional<Slot> seat;
     bool ready = false;
+    bool waiting = false;
 };
 
 // First step of the game: the waiting room. No input/output here, so any interface (console, web, ...) can drive it.
@@ -112,10 +115,25 @@ class Lobby {
 
         // Enters the waiting room. The name is stored without the spaces around it. A new player changes who is going
         // to play, so everybody's ready is cancelled.
-        void join(string name) {
+        void join(string name, bool waiting = false) {
             string clean = checkNewName(name);
             cancelEveryonesReady();
-            joined.push_back(Member{clean, nullopt, false});
+            joined.push_back(Member{clean, nullopt, false, waiting});
+        }
+
+        // Marks somebody as waiting for the next game (or not).
+        void setWaiting(const string& name, bool waiting) {
+            find(name).waiting = waiting;
+        }
+
+        // Everybody is back in the waiting room for a new game: no seats, nobody ready, nobody waiting. The universes
+        // and the time limits stay as they were.
+        void startOver() {
+            for (Member& member : joined) {
+                member.seat = nullopt;
+                member.ready = false;
+                member.waiting = false;
+            }
         }
 
         // Leaves the waiting room, freeing the name and the seat. The others are no longer ready, for the same reason.

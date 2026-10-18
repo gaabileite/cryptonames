@@ -89,8 +89,22 @@
             <div id="late-teams" class="teams"></div>
             <p id="late-error" class="error" role="alert" hidden></p>
             <div class="wait-actions">
+                <button id="late-wait" type="button">Wait for the next game instead</button>
                 <button id="late-leave" type="button" class="link">Leave the room</button>
             </div>
+        </section>
+
+        <!-- Somebody who chose to wait for the next game, in a room whose match is going on (or just ended) -->
+        <section id="screen-hold" hidden>
+            <h2>Waiting room</h2>
+            <p id="hold-text" class="note"></p>
+            <p id="hold-roster" class="note small"></p>
+            <div class="wait-actions">
+                <button id="hold-join" type="button" class="primary">Join the game in progress</button>
+                <button id="hold-again" type="button" class="primary">Open the waiting room for a new game</button>
+                <button id="hold-leave" type="button" class="link">Leave the room</button>
+            </div>
+            <p id="hold-error" class="error" role="alert" hidden></p>
         </section>
 
         <!-- Game -->
@@ -125,6 +139,7 @@
 
             <div class="actions">
                 <button id="end-turn" type="button" class="primary" hidden>End turn</button>
+                <button id="again-btn" type="button" class="primary" hidden>Play again</button>
                 <button id="forfeit-btn" type="button" class="danger">Forfeit</button>
                 <button id="leave-room-btn" type="button" class="link">Leave the room</button>
                 <div id="confirm-box" class="confirm-box" role="group" aria-label="Please confirm" hidden>
@@ -135,6 +150,20 @@
             </div>
         </section>
     </main>
+
+    <!-- Shown to somebody who enters a room while a game is going on: join it, or wait in the room's waiting room -->
+    <div id="join-choice" class="overlay" hidden>
+        <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="choice-title" aria-describedby="choice-text">
+            <h2 id="choice-title">A game is already in progress</h2>
+            <p id="choice-text"></p>
+            <p id="choice-detail" class="note"></p>
+            <div class="dialog-actions">
+                <button id="choice-play" type="button" class="primary">Join the game anyway</button>
+                <button id="choice-wait" type="button" class="primary">Stay in the waiting room</button>
+                <button id="choice-cancel" type="button" class="link">Cancel</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Shown when a game with only 2 or 3 players begins -->
     <div id="coop-alert" class="overlay" hidden>

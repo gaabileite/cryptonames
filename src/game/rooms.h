@@ -92,15 +92,16 @@ class RoomRegistry {
             return Entry{raw, token};
         }
 
-        // Puts the player in the room with that code.
-        Entry join(const string& typedCode, const string& playerName, Clock::time_point now = Clock::now()) {
+        // Puts the player in the room with that code. If a match is going on in it, `choice` says what they want to do
+        // (see Room::join); without one, MatchInProgress is thrown and the player is not let in.
+        Entry join(const string& typedCode, const string& playerName, Clock::time_point now = Clock::now(), JoinChoice choice = JoinChoice::UNDECIDED) {
             sweep(now);
             auto found = rooms.find(normalizeCode(typedCode));
             if (found == rooms.end()) {
                 throw NoSuchRoom("There is no room with that code");
             }
             Room* room = found->second.get();
-            string token = room->join(playerName);
+            string token = room->join(playerName, choice);
             room->touch(now);
             roomOfToken[token] = room->code();
             return Entry{room, token};

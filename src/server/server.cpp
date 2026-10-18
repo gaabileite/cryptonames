@@ -10,9 +10,13 @@
 //
 // Entering:
 //   POST /api/rooms/create  {"name"} makes a room and puts you in it -> {"code", "token", ...}
-//   POST /api/rooms/join    {"code", "name"} -> {"code", "token", ...}          404 if there is no such room
-//                           Also works while a match is going on (not after it): the newcomer has no team and no role
-//                           until they pick them with /api/seat, once, and cannot play before that.
+//   POST /api/rooms/join    {"code", "name", "duringMatch": "play"|"wait"} -> {"code", "token", ...}   404 if there is no such room
+//                           While a match is going on, "duringMatch" is required: without it the answer is 409 with
+//                           {"error", "matchInProgress": true, "cooperative", "players"} and nobody is let in, so the
+//                           page can ask the player.
+//                           "play": the newcomer has no team and no role until they pick them with /api/seat, once, and
+//                           cannot play before that. "wait": they stay in the room's waiting room for the next game
+//                           ("waiting": true). Once the match is over nobody has anything to join: they just wait.
 // Waiting room (until every seat is taken and everybody is ready, then the match starts by itself):
 //   GET  /api/lobby      the room code, who is in the waiting room (team and role are null until picked, plus "ready"),
 //                        how many players a game takes (2 to 10), whether the game would be co-operative (fewer than 4
@@ -26,8 +30,12 @@
 //                        of the guessing; cancels everybody's ready                       (X-Token)
 //   POST /api/ready      {"ready": true|false}                                             (X-Token)
 //   POST /api/leave      leaves the room (see below)                                       (X-Token)
+//   POST /api/wait       {"wait": true|false} during a match, somebody without a seat decides to wait for the next game
+//                        (true) or to join this one (false)                                (X-Token)
+//   POST /api/play-again after a match is over: everybody in the room goes back to the waiting room, with no seats and
+//                        nobody ready, to start another match                              (X-Token)
 // Match:
-//   GET  /api/state      the room code, the turn, the cards left, the time left, the clue and tries left, the winner,
+//   GET  /api/state      the room code, which match of the room this is ("game"), the turn, the cards left, the time left, the clue and tries left, the winner,
 //                        who you are, whether the game is co-operative, and whether leaving would make your team
 //                        forfeit                                                            (X-Token)
 //   GET  /api/board      the 25 cards as YOU may see them                                  (X-Token)
@@ -102,7 +110,7 @@ bool booleanField(const json& body, const string& field) {
 
 // team and role are null while the player has not picked a seat.
 json memberJson(const Member& member) {
-    json answer = {{"name", member.name}, {"team", nullptr}, {"role", nullptr}, {"ready", member.ready}};
+    json answer = {{"name", member.name}, {"team", nullptr}, {"role", nullptr}, {"ready", member.ready}, {"waiting", member.waiting}};
     if (member.seat) {
         answer["team"] = toString(member.seat->first);
         answer["role"] = toString(member.seat->second);
@@ -159,6 +167,9 @@ httplib::Server::Handler endpoint(function<json(const httplib::Request&)> action
         } catch (const NotInRoom& e) {
             status = 401;
             answer = {{"error", e.what()}};
+        } catch (const MatchInProgress& e) {
+            status = 409;
+            answer = {{"error", e.what()}, {"matchInProgress", true}, {"cooperative", e.cooperative}, {"players", e.players}};
         } catch (const NoSuchRoom& e) {
             status = 404;
             answer = {{"error", e.what()}};
@@ -225,7 +236,28 @@ int main(int argc, char* argv[]) {
     server.Post("/api/rooms/join", endpoint([](const httplib::Request& req) {
         json body = bodyOf(req);
         string code = textField(body, "code");
-        return enteredJson(rooms->join(code, textField(body, "name")));
+        string name = textField(body, "name");
+        JoinChoice choice = JoinChoice::UNDECIDED;           // only matters when a match is going on
+        if (body.contains("duringMatch")) {
+            string said = body["duringMatch"].is_string() ? body["duringMatch"].get<string>() : "";
+            if (said == "play") choice = JoinChoice::PLAY;
+            else if (said == "wait") choice = JoinChoice::WAIT;
+            else throw HttpError(400, "duringMatch must be play or wait");
+        }
+        return enteredJson(rooms->join(code, name, RoomRegistry::Clock::now(), choice));
+    }));
+
+    server.Post("/api/wait", endpoint([](const httplib::Request& req) {
+        json body = bodyOf(req);
+        Visitor in = visitorOf(req);
+        in.room.setWaiting(in.token, booleanField(body, "wait"));
+        return memberJson(in.room.member(in.token));
+    }));
+
+    server.Post("/api/play-again", endpoint([](const httplib::Request& req) {
+        Visitor in = visitorOf(req);
+        in.room.newGame(in.token);
+        return json{{"ok", true}};
     }));
 
     server.Post("/api/leave", endpoint([](const httplib::Request& req) {
@@ -303,7 +335,7 @@ int main(int argc, char* argv[]) {
     server.Get("/api/state", endpoint([](const httplib::Request& req) {
         Visitor in = visitorOf(req);
         const Member& you = in.you;
-        json answer = {{"room", in.room.code()}, {"started", in.room.started()}, {"you", memberJson(you)}};
+        json answer = {{"room", in.room.code()}, {"game", in.room.gameNumber()}, {"started", in.room.started()}, {"you", memberJson(you)}};
         if (in.room.started()) {
             Match& match = in.room.match();               // brings the clock up to date first
             answer["finished"] = match.isFinished();

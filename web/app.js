@@ -1,6 +1,8 @@
 // Front-end of CryptoNames. Talks to the JSON API of the server (see src/server/server.cpp).
-// Four screens: join (just a name), wait (pick a team and a role, then press ready), game (board + end-turn button)
-// and late (somebody who came into a match that is already going on picks a team and a role to join it).
+// Five screens: join (just a name), wait (pick a team and a role, then press ready), game (board + end-turn button),
+// late (somebody who came into a match that is already going on picks a team and a role to join it) and hold
+// (somebody who chose to stay in the room's waiting room until the match is over).
+// Entering a room while a match is going on first asks: join the game in progress, or wait for the next one.
 // A game has from 2 to 10 players, and any number of them can share a team and a role. With fewer than 4 players the
 // game is co-operative: everybody is on the Blue team (the server decides the roles) and an alert says so.
 // The page asks the server for the state every POLL_MS; everything the player sees comes from the server.
@@ -16,7 +18,7 @@
     const NAMES = { BLUE: 'Blue', RED: 'Red', SPY: 'Spy', GUESSER: 'Guesser', BEIGE: 'Beige', BLACK: 'Black' };
 
     const $ = (id) => document.getElementById(id);
-    const screens = { join: $('screen-join'), wait: $('screen-wait'), late: $('screen-late'), game: $('screen-game') };
+    const screens = { join: $('screen-join'), wait: $('screen-wait'), late: $('screen-late'), hold: $('screen-hold'), game: $('screen-game') };
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
     // ---------- Token (kept so a page refresh does not lose the seat) ----------
@@ -49,6 +51,7 @@
         if (!response.ok) {
             const error = new Error((data && data.error) || `Request failed (${response.status})`);
             error.status = response.status;
+            error.data = data;
             throw error;
         }
         return data;
@@ -160,11 +163,37 @@
             resetRendering();
             await refreshPlay();
         } catch (error) {
-            showError('join-error', error.message);
+            if (error.status === 409 && error.data && error.data.matchInProgress) askWhatToDo(path, body, error.data);
+            else showError('join-error', error.message);
         } finally {
             $('create-btn').disabled = $('join-btn').disabled = false;
         }
     }
+
+    // The room has a game going on and nobody was let in yet: the player decides whether to join it or to wait.
+    let pendingJoin = null;           // { path, body } to send again with the choice
+    function askWhatToDo(path, body, info) {
+        pendingJoin = { path, body };
+        const code = String(body.code).toUpperCase().replace(/[^A-Z0-9]/g, '');
+        $('choice-text').textContent = `Room ${code} is already playing a game right now.`;
+        $('choice-detail').textContent = (info.cooperative
+            ? `It is a co-operative game with ${info.players} players: everybody is on the Blue team, so if you join it you pick a role (spy or guesser). `
+            : `It is a game with ${info.players} players: if you join it you pick a team (Blue or Red) and a role (spy or guesser). `)
+            + "Or stay in the room's waiting room until this game is over: then anybody there can open the waiting room for a new game.";
+        $('join-choice').hidden = false;
+        $('choice-wait').focus();
+    }
+
+    function answerChoice(choice) {
+        const pending = pendingJoin;
+        pendingJoin = null;
+        $('join-choice').hidden = true;
+        if (choice && pending) enterRoom(pending.path, { ...pending.body, duringMatch: choice });
+    }
+
+    $('choice-play').addEventListener('click', () => answerChoice('play'));
+    $('choice-wait').addEventListener('click', () => answerChoice('wait'));
+    $('choice-cancel').addEventListener('click', () => answerChoice(null));
 
     function typedName() {
         const name = $('name').value.trim();
@@ -525,11 +554,68 @@
         }
     });
 
+    // Changed their mind: stay in the room's waiting room until the match is over
+    $('late-wait').addEventListener('click', async () => {
+        if (busy) return;
+        busy = true;
+        showError('late-error', '');
+        try {
+            await api('POST', '/api/wait', { wait: true });
+        } catch (error) {
+            if (error.status !== 401) showError('late-error', error.message);
+        } finally {
+            busy = false;
+            delete lastRendered.late;
+            refreshPlay().catch(() => {});
+        }
+    });
+
     $('late-leave').addEventListener('click', async () => {
         try {
             await api('POST', '/api/leave');
         } catch (error) {
             if (error.status !== 401) return showError('late-error', error.message);
+        }
+        forgetSeat();
+        goToStart();
+    });
+
+    // ---------- Staying in the room's waiting room while a match goes on ----------
+
+    function renderHold(lobby, state) {
+        show('hold');
+        renderWhoAmI(state.you);
+        if (!changed('hold', { lobby, finished: state.finished, you: state.you })) return;
+        const playing = lobby.players.filter((player) => player.team);
+        $('hold-text').textContent = state.finished
+            ? 'The game is over. Open the waiting room for a new game: everybody in the room goes back to it, and picks a team and a role again.'
+            : `A game is in progress in this room. You are staying in the room's waiting room: when the game is over, anybody here can open it for a new game. You can also join the game that is going on right now${state.cooperative ? ' (everybody plays on the Blue team, so you pick a role)' : ' (you pick a team and a role)'}.`;
+        $('hold-roster').textContent = playing.length === 0 ? '' : `Playing: ${playing.map((player) => `${player.name} (${state.cooperative ? '' : `${NAMES[player.team]} `}${NAMES[player.role]})`).join(', ')}.`;
+        $('hold-join').hidden = !!state.finished;
+        $('hold-again').hidden = !state.finished;
+    }
+
+    async function holdAction(path, body) {
+        if (busy) return;
+        busy = true;
+        showError('hold-error', '');
+        try {
+            await api('POST', path, body);
+        } catch (error) {
+            if (error.status !== 401) showError('hold-error', error.message);
+        } finally {
+            busy = false;
+            delete lastRendered.hold;
+            refreshPlay().catch(() => {});
+        }
+    }
+    $('hold-join').addEventListener('click', () => holdAction('/api/wait', { wait: false }));
+    $('hold-again').addEventListener('click', () => holdAction('/api/play-again'));
+    $('hold-leave').addEventListener('click', async () => {
+        try {
+            await api('POST', '/api/leave');
+        } catch (error) {
+            if (error.status !== 401) return showError('hold-error', error.message);
         }
         forgetSeat();
         goToStart();
@@ -661,10 +747,11 @@
 
     // ---------- The co-operative game alert ----------
 
-    // Shown once per player, when a game with only 2 or 3 players begins.
+    // Shown once per player and match, when a game with only 2 or 3 players begins.
+    const coopKey = (game) => `${token}:${game}`;
     const NUMBER_WORDS = { 2: 'two', 3: 'three' };
     function showCoopAlert(state) {
-        if (!state.cooperative || storage.get('coopSeen') === token || !$('coop-alert').hidden) return;
+        if (!state.cooperative || storage.get('coopSeen') === coopKey(state.game) || !$('coop-alert').hidden) return;
         const count = state.playerCount;
         $('coop-text').textContent = `Your game only contains ${NUMBER_WORDS[count] || count} people. This will be a co-operative game.`;
         $('coop-detail').textContent = `Everybody plays on the Blue team, and you are ${state.you.role === 'SPY' ? 'a spy: you see every colour and give the clues' : 'a guesser: you pick the cards'}. `
@@ -674,7 +761,7 @@
     }
 
     function closeCoopAlert() {
-        storage.set('coopSeen', token);
+        storage.set('coopSeen', coopKey(currentGame));
         $('coop-alert').hidden = true;
     }
 
@@ -774,6 +861,12 @@
         show('game');
         document.title = state.canGuess || state.canGiveClue ? `Your turn - ${BASE_TITLE}` : BASE_TITLE;
         updateTimer(state.timer, state.finished);
+        if (state.game !== currentGame) {         // a new match of the same room: nothing of the last one is kept
+            currentGame = state.game;
+            lastStates = null;
+            delete lastRendered.game;
+            asking = null;
+        }
         leavingForfeits = state.leavingForfeits;
         cooperative = state.cooperative;
         showCoopAlert(state);
@@ -852,12 +945,14 @@
     // Leaving a match that is still going on makes the team forfeit, so the confirmation says so.
     let asking = null;                // null, 'forfeit' or 'leave'
     let gameFinished = false;
+    let currentGame = null;           // which match of the room the board on screen belongs to
     let leavingForfeits = true;       // would my team have to give up if I left? (the server knows: others may take my place)
     let cooperative = false;
     let askedFrom = null;             // the button that opened the question, to give the focus back to it
     function renderActions(finished) {
         gameFinished = finished;
         if (finished) asking = null;           // nothing to give up any more, and leaving no longer forfeits
+        $('again-btn').hidden = !finished;
         $('forfeit-btn').hidden = finished || asking !== null;
         $('leave-room-btn').hidden = asking !== null;
         $('confirm-box').hidden = asking === null;
@@ -956,13 +1051,28 @@
         }
     }
 
+    // After the match, anybody can send the whole room back to the waiting room
+    $('again-btn').addEventListener('click', async () => {
+        if (busy) return;
+        busy = true;
+        try {
+            await api('POST', '/api/play-again');
+        } catch (error) {
+            if (error.status !== 401) toast(error.message, true);
+        } finally {
+            busy = false;
+            refreshPlay().catch(() => {});
+        }
+    });
+
     $('forfeit-btn').addEventListener('click', () => ask('forfeit', $('forfeit-btn')));
     // After the match there is nothing to forfeit, so leaving needs no question
     $('leave-room-btn').addEventListener('click', () => (gameFinished ? leaveTheRoom() : ask('leave', $('leave-room-btn'))));
     $('confirm-no').addEventListener('click', stopAsking);
     $('confirm-yes').addEventListener('click', () => (asking === 'leave' ? leaveTheRoom() : forfeit()));
     document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && !$('coop-alert').hidden) closeCoopAlert();
+        if (event.key === 'Escape' && !$('join-choice').hidden) answerChoice(null);
+        else if (event.key === 'Escape' && !$('coop-alert').hidden) closeCoopAlert();
         else if (event.key === 'Escape' && asking) stopAsking();
     });
 
@@ -978,7 +1088,9 @@
             return;
         }
         if (!state.you.team) {
-            renderLate(await api('GET', '/api/lobby'), state);        // came in during the match: no seat yet
+            // came in during the match and has no seat: waiting for the next game, or picking a seat to join this one
+            const lobby = await api('GET', '/api/lobby');
+            if (state.you.waiting || state.finished) renderHold(lobby, state); else renderLate(lobby, state);
             return;
         }
         renderGame(state, await api('GET', '/api/board'));

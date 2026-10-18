@@ -440,6 +440,7 @@ button.danger:disabled { opacity: 0.4; cursor: not-allowed; }
 }
 .dialog h2 { margin-top: 0; }
 .dialog button { margin-top: 8px; }
+.dialog-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
 
 @media (max-width: 900px) {
     .board { grid-template-columns: repeat(3, 1fr); }

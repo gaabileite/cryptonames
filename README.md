@@ -41,16 +41,26 @@ build/server    # start the server on http://127.0.0.1:8080
 7. Each turn starts with a **clue**. A spy of the team on turn types 1 or 2 words and picks a number (from 1 to the cards the team still has to find). Everybody sees the clue. Only then can the team's guessers click cards (any of them), and the number is how many **tries** the team has: every card revealed costs one try, and the turn ends by itself when they run out. Spies see the colour of every card, guessers see beige until a card is revealed.
 8. If the guesser reveals a **wrong card** (beige or the other team's), the turn ends at once, and the tries that were not used well are added to the team's next clue: the clue number minus the good tries. Example: clue FIRE 3, one good card and then a beige one: the next clue, SUNSHINE 2, gives the guesser 2 + 2 = 4 tries. Ending the turn on purpose, or running out of time, carries nothing over.
 9. Any player of either team (spy or guesser) can press **Forfeit** at any time, even when it is not their turn. A second click confirms it, and then the other team wins.
-10. **Leave the room** takes you back to the start page. During a match you are asked first: your team goes on without you, unless you were its last spy or its last guesser, and then it forfeits. After the match leaving is free. When the last player has left, the room is deleted; make a new one to play again.
+10. **Leave the room** takes you back to the start page. During a match you are asked first: your team goes on without you, unless you were its last spy or its last guesser, and then it forfeits. After the match leaving is free. When the last player has left, the room is deleted. To play again with the same people, use *Play again* (see below) instead of leaving.
 11. The black card loses the game for the team that reveals it. The first team to reveal all its cards wins. Every card that is picked turns over on every player's screen.
 
 ### Joining a game in progress
 
-A new player can enter a room (with its code or invite link) while the match is going on, as long as the room has fewer than 10 players and the match is not over. They type their name as usual and land on a **Join the game in progress** page, where they pick a team and a role once; nobody else is interrupted. That seat is final until the end of the game, and until they pick it they cannot play (and they do not see the board). Joining a game does not cancel anybody's ready or touch the clocks.
+Anybody can enter a room (with its code or invite link) while the match is going on, as long as the room has fewer than 10 players. Nobody is let in without choosing first: a message says that the room is already playing a game, what kind of game it is (co-operative or Blue against Red, and with how many players), and offers two choices (plus *Cancel*, which leaves nothing behind):
 
-- The number of players does not change the kind of game: a game that started co-operative stays co-operative, and a newcomer there is always on the Blue team, whatever team they click (they only choose the role).
+- **Join the game anyway.** The newcomer lands on a **Join the game in progress** page that shows who holds each seat, and has to pick a team (Blue or Red; in a co-operative game everybody is on Blue, so only the role is chosen) and a role (spy or guesser). Until they do, they cannot play and do not see the board; the seat is final for the rest of the game. That page also has *Wait for the next game instead*. Nobody else is interrupted, and joining does not cancel anybody's ready or touch the clocks.
+- **Stay in the waiting room.** The newcomer waits in the room's waiting room: they see who is playing, and can still press *Join the game in progress* if they change their mind. When the game is over, they (or anybody in the room) can open the waiting room for a new game.
+
+Other things to know:
+
+- A game that started co-operative stays co-operative, and a newcomer there is always on the Blue team, whatever team they click (they only choose the role).
 - A newcomer who picks a spy sees every colour, so a team may want to agree on who takes that role.
 - Somebody who left can come back with the same name and picks a new seat.
+- A room that enters a finished game has nothing to join: the newcomer simply waits for the next game.
+
+### Playing again
+
+When a match is over, every player (and everybody who was waiting) has a button to go on: **Play again** on the game page, or **Open the waiting room for a new game** for those who were waiting. Anybody can press it, and then the whole room goes back to the waiting room: nobody has a seat or is ready, and the universes and time limits stay as they were. Players who want to leave simply press *Leave the room* instead. The room keeps its code and its players, so there is no need to make a new one.
 
 ### Co-operative game (2 or 3 players)
 
