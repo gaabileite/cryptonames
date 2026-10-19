@@ -322,22 +322,21 @@
         for (const universe of lobby.universes) {
             const { input, num } = universeBoxes[universe.name];
             input.checked = universe.selected;
-            // the last universes that still make a full board cannot be switched off
+            // the last universes that still make a full board cannot be switched off: they stay on, and trying says why
             const needed = lobby.charactersNeeded;
             const cannotTurnOff = universe.selected && lobby.charactersSelected - universe.count < needed;
-            input.disabled = cannotTurnOff;
-            input.title = cannotTurnOff ? `Without these characters there are fewer than ${needed}, and a game needs ${needed}.` : '';
-            num.textContent = `${universe.count} characters`;
+            input.dataset.keep = cannotTurnOff ? `Too few characters: a game needs at least ${needed}, and without this universe there would be only ${lobby.charactersSelected - universe.count}.` : '';
+            num.textContent = String(universe.count);
+            num.title = `${universe.count} characters`;
         }
-        $('universe-count').textContent = `${lobby.charactersSelected} characters selected. A game needs at least ${lobby.charactersNeeded}.`;
     }
 
     // Time limits: one for the spy to give the clue and one for the guesser, each with a checkbox, the seconds and quick choices.
     const TIMER_ROWS = [
-        { key: 'clue', checkbox: 'Limit the time to give the clue', label: 'Seconds for the clue', presets: [[30, '30 s'], [60, '1 min'], [120, '2 min']] },
-        { key: 'guess', checkbox: 'Limit the time to guess', label: 'Seconds for guessing', presets: [[30, '30 s'], [60, '1 min'], [120, '2 min'], [300, '5 min']] },
+        { key: 'clue', checkbox: 'Clue time', label: 'Seconds for the clue', presets: [[30, '30 s'], [60, '1 min'], [120, '2 min']] },
+        { key: 'guess', checkbox: 'Guessing time', label: 'Seconds for guessing', presets: [[30, '30 s'], [60, '1 min'], [120, '2 min'], [300, '5 min']] },
     ];
-    const timerRows = {};         // 'clue' -> { on, seconds, presets: [buttons] }
+    const timerRows = {};         // 'clue' -> { on, seconds, presetBox, presets: [buttons] }
     (function buildTimerRows() {
         for (const row of TIMER_ROWS) {
             const wrapper = document.createElement('div');
@@ -350,14 +349,10 @@
             on.id = `timer-${row.key}-on`;
             check.append(on, ` ${row.checkbox}`);
 
-            const line = document.createElement('div');
-            line.className = 'timer-seconds';
-            const label = document.createElement('label');
-            label.htmlFor = `timer-${row.key}-seconds`;
-            label.textContent = row.label;
             const seconds = document.createElement('input');
             seconds.type = 'number';
             seconds.id = `timer-${row.key}-seconds`;
+            seconds.setAttribute('aria-label', row.label);
             seconds.inputMode = 'numeric';
             seconds.step = '5';
             const presetBox = document.createElement('span');
@@ -372,10 +367,9 @@
                 presetBox.append(button);
                 presets.push(button);
             }
-            line.append(label, seconds, presetBox);
-            wrapper.append(check, line);
+            wrapper.append(check, seconds, presetBox);
             $('timer-rows').append(wrapper);
-            timerRows[row.key] = { on, seconds, presets };
+            timerRows[row.key] = { on, seconds, presetBox, presets };
 
             on.addEventListener('change', () => {
                 waitAction(() => api('POST', '/api/timer', { phase: row.key, enabled: on.checked })).catch(() => {});
@@ -399,34 +393,21 @@
         }
     })();
 
-    function formatSeconds(total) {
-        const minutes = Math.floor(total / 60), seconds = total % 60;
-        return minutes === 0 ? `${seconds} seconds` : (seconds === 0 ? `${minutes} min` : `${minutes} min ${seconds} s`);
-    }
-
     function renderTimerSetup(lobby) {
         const timers = lobby.timers;
         for (const row of TIMER_ROWS) {
             const limit = timers[row.key];
-            const { on, seconds, presets } = timerRows[row.key];
+            const { on, seconds, presetBox, presets } = timerRows[row.key];
             on.checked = limit.enabled;
             seconds.min = timers.min;
             seconds.max = timers.max;
+            seconds.hidden = presetBox.hidden = !limit.enabled;       // the choices only show once the limit is switched on
             seconds.disabled = !limit.enabled;
             if (document.activeElement !== seconds) seconds.value = limit.seconds;    // never overwrite what somebody is typing
             for (const button of presets) {
                 button.disabled = !limit.enabled;
                 button.classList.toggle('on', limit.enabled && Number(button.dataset.seconds) === limit.seconds);
             }
-        }
-        const clue = timers.clue, guess = timers.guess;
-        if (!clue.enabled && !guess.enabled) {
-            $('timer-note').textContent = "No time limits: the spy and the guesser can take as long as they need. Anybody can turn a limit on, and doing so cancels everybody's ready.";
-        } else {
-            $('timer-note').textContent =
-                (clue.enabled ? `The spy has at most ${formatSeconds(clue.seconds)} to give the clue. ` : 'The clue has no time limit. ') +
-                (guess.enabled ? `The guesser has at most ${formatSeconds(guess.seconds)}, counted from the moment the clue is sent. ` : 'Guessing has no time limit. ') +
-                `When time runs out, the turn passes to the other team (from ${timers.min} to ${timers.max} seconds can be chosen). Changing a limit cancels everybody's ready.`;
         }
     }
 
@@ -441,29 +422,14 @@
         const players = lobby.players;
         const total = players.length;
         const ready = players.filter((player) => player.ready).length;
-        const unseated = players.filter((player) => !player.team);
         const coop = lobby.cooperative;
 
         paintSeats(waitSeats, players, coop, you, { showReady: true, locked: you.ready });      // locked while I am ready
 
-        // Status line
-        let status;
-        if (total < lobby.minPlayers) status = `${total} of at least ${lobby.minPlayers} players have joined. Waiting for ${lobby.minPlayers - total} more.`;
-        else if (lobby.missing) status = lobby.missing;
-        else if (ready < total) status = `${ready} of ${total} players are ready. The game starts when everyone is ready.`;
-        else status = 'Everyone is ready. Starting...';
-        $('wait-count').textContent = status;
-
-        $('coop-note').hidden = !coop;
-        $('coop-note').textContent = `With fewer than ${lobby.teamGameMinPlayers} players this is a co-operative game: everybody plays on the Blue team and only the role you pick counts. `
-            + 'If everybody picks the same role, one player is chosen at random to take the other.';
-        $('players-note').textContent = `A game takes from ${lobby.minPlayers} to ${lobby.maxPlayers} players, and any number of them can share a team and a role. `
-            + `With ${lobby.teamGameMinPlayers} or more, Blue plays against Red and each team needs a spy and a guesser. `
-            + "When a player joins or leaves, everybody's ready is cancelled.";
-
-        $('wait-unseated').hidden = unseated.length === 0;
-        $('wait-unseated').textContent = `Still choosing a team: ${unseated.map((player) => player.name).join(', ')}`;
-        $('wait-locked').hidden = !you.ready;
+        // Only one short message, and only when something stops the game from starting (the server words it)
+        $('wait-issue').textContent = lobby.missing || '';
+        $('wait-issue').hidden = !lobby.missing;
+        $('ready-count').textContent = `${ready}/${total} ready`;
 
         renderUniverses(lobby);
         renderTimerSetup(lobby);
@@ -519,6 +485,11 @@
     // Only the universe that was clicked is sent, so a page that is a moment out of date cannot undo what somebody else just did.
     $('universe-list').addEventListener('change', (event) => {
         const input = event.target;
+        if (!input.checked && input.dataset.keep) {        // it would leave too few characters: the universe stays on
+            input.checked = true;
+            showError('wait-error', input.dataset.keep);
+            return;
+        }
         waitAction(() => api('POST', '/api/universes', { universe: input.value, selected: input.checked })).catch(() => {});
     });
 

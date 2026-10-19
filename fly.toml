@@ -1,29 +1,33 @@
-# Fly.io settings for CryptoNames. Deploy with: fly deploy --ha=false   (see the README)
-# The rooms live in the server's memory, so there must be exactly ONE machine, and it must never sleep.
-app = "cryptonames"          # app names are unique on Fly: if it is taken, change it here (or let `fly launch` pick one)
-primary_region = "iad"       # US East (Virginia)
+# fly.toml app configuration file generated for cryptonames on 2026-10-19T12:15:41-03:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'cryptonames'
+primary_region = 'iad'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [env]
-  PORT = "8080"
+  PORT = '8080'
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "off"       # a stopped machine would lose every room
+  auto_stop_machines = 'off'
   auto_start_machines = false
   min_machines_running = 1
 
   [[http_service.checks]]
-    method = "GET"
-    path = "/"
-    interval = "30s"
-    timeout = "5s"
-    grace_period = "5s"
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '5s'
+    method = 'GET'
+    path = '/'
 
 [[vm]]
-  cpu_kind = "shared"
+  memory = '256mb'
+  cpu_kind = 'shared'
   cpus = 1
-  memory = "256mb"
+  memory_mb = 256

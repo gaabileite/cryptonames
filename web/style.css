@@ -102,7 +102,7 @@ h3 { margin: 28px 0 8px; font-size: 1rem; color: var(--muted); }
 .room-option input[type="text"] { text-transform: uppercase; letter-spacing: 0.12em; font-weight: 700; }
 .room-option button { margin-top: auto; }
 
-.room-code-box { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 0 0 12px; }
+.room-code-box { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 0; }
 .room-code { font-size: 1.8rem; letter-spacing: 0.18em; }
 
 label { display: block; margin-bottom: 6px; font-weight: 600; }
@@ -157,9 +157,18 @@ input[type="text"] {
 .slot:disabled { cursor: not-allowed; }
 .slot.mine { border-color: var(--text); box-shadow: 0 0 0 2px var(--text); }
 .slot.mine .who { color: var(--text); font-weight: 700; }
-.coop-note { max-width: 720px; padding: 10px 14px; border-left: 4px solid var(--blue); background: var(--surface); border-radius: 6px; }
 
-.universes { max-width: 720px; margin: 20px 0 0; padding: 0; border: 0; }
+/* The waiting room: the teams on the left and the settings on the right, so nothing needs scrolling on a computer */
+.wait-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 24px; margin-bottom: 16px; }
+.wait-head h2 { margin: 0; }
+.wait-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px 32px; align-items: start; }
+.wait-main .teams { max-width: none; }
+.wait-side { display: grid; gap: 20px; }
+@media (min-width: 900px) {
+    .wait-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+#wait-issue, #wait-error { margin: 0 0 14px; }
+.universes { margin: 0; padding: 0; border: 0; }
 .universes legend { padding: 0; margin-bottom: 8px; font-weight: 700; }
 .universe-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .universe-list .uni { position: relative; margin: 0; font-weight: 400; }
@@ -178,17 +187,16 @@ input[type="text"] {
 .universe-list .uni input:checked + .pill { border-color: var(--text); background: var(--bg); font-weight: 700; }
 .universe-list .uni input:checked + .pill .check::before { content: "✓"; color: var(--ok); }
 .universe-list .uni input:focus-visible + .pill { outline: 3px solid var(--blue); outline-offset: 2px; }
-.universe-list .uni input:disabled { cursor: not-allowed; }
-.universe-list .uni input:disabled + .pill { opacity: 0.55; }
-.timer-setup { max-width: 720px; margin: 20px 0 0; padding: 0; border: 0; }
+.universe-list .uni input[data-keep]:not([data-keep=""]) + .pill { opacity: 0.55; }
+.timer-setup { margin: 0; padding: 0; border: 0; }
 .timer-setup legend { padding: 0; margin-bottom: 8px; font-weight: 700; }
-.timer-row + .timer-row { margin-top: 14px; }
+.timer-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.timer-row + .timer-row { margin-top: 10px; }
+.timer-row .check-row { min-width: 8rem; }
 .check-row { display: flex; align-items: center; gap: 10px; margin: 0; font-weight: 400; cursor: pointer; }
 .check-row input { width: 1.2rem; height: 1.2rem; margin: 0; }
-.timer-seconds { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 10px; }
-.timer-seconds label { margin: 0; font-weight: 400; }
-.timer-seconds input[type="number"] {
-    width: 6.5rem;
+.timer-row input[type="number"] {
+    width: 4.8rem;
     padding: 8px 10px;
     font: inherit;
     color: inherit;
@@ -196,10 +204,10 @@ input[type="text"] {
     border: 1px solid var(--border);
     border-radius: 8px;
 }
-.timer-seconds input:disabled { opacity: 0.5; }
+.timer-row input:disabled { opacity: 0.5; }
 .presets { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 .presets button {
-    padding: 6px 12px;
+    padding: 6px 10px;
     color: inherit;
     background: var(--surface);
     border: 2px solid var(--border);

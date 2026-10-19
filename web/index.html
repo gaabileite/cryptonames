@@ -51,38 +51,38 @@
 
         <!-- Waiting room: pick (and change) team and role, then press ready -->
         <section id="screen-wait" hidden>
-            <h2>Waiting room</h2>
-            <div class="room-code-box">
-                <span class="note">Room code</span>
-                <strong id="room-code" class="room-code"></strong>
-                <button id="copy-code" type="button" class="link">Copy invite link</button>
+            <div class="wait-head">
+                <h2>Waiting room</h2>
+                <div class="room-code-box">
+                    <span class="note">Room code</span>
+                    <strong id="room-code" class="room-code"></strong>
+                    <button id="copy-code" type="button" class="link">Copy invite link</button>
+                </div>
             </div>
-            <p id="wait-count" class="note"></p>
-
-            <div id="teams" class="teams"></div>
-            <p id="coop-note" class="note coop-note" hidden></p>
-            <p id="wait-unseated" class="note" hidden></p>
-            <p id="players-note" class="note small"></p>
-            <fieldset class="universes">
-                <legend>Universes in this game</legend>
-                <div id="universe-list" class="universe-list"></div>
-                <p id="universe-count" class="note"></p>
-                <p class="note small">Anybody in the waiting room can change this. Changing it cancels everybody's ready.</p>
-            </fieldset>
-
-            <fieldset class="timer-setup">
-                <legend>Time limits</legend>
-                <div id="timer-rows" class="timer-rows"></div>
-                <p id="timer-note" class="note small"></p>
-            </fieldset>
-
-            <p id="wait-locked" class="note" hidden>You are ready, so your team and role are locked. Cancel ready to change them.</p>
-
-            <div class="wait-actions">
-                <button id="ready-btn" type="button" class="primary" aria-pressed="false">I'm ready</button>
-                <button id="leave-btn" type="button" class="link">Leave the waiting room</button>
-            </div>
+            <p id="wait-issue" class="error" role="status" hidden></p>
             <p id="wait-error" class="error" role="alert" hidden></p>
+
+            <div class="wait-layout">
+                <div class="wait-main">
+                    <div id="teams" class="teams"></div>
+                    <div class="wait-actions">
+                        <button id="ready-btn" type="button" class="primary" aria-pressed="false">I'm ready</button>
+                        <span id="ready-count" class="note"></span>
+                        <button id="leave-btn" type="button" class="link">Leave the waiting room</button>
+                    </div>
+                </div>
+
+                <div class="wait-side">
+                    <fieldset class="universes">
+                        <legend>Universes</legend>
+                        <div id="universe-list" class="universe-list"></div>
+                    </fieldset>
+                    <fieldset class="timer-setup">
+                        <legend>Time limits</legend>
+                        <div id="timer-rows" class="timer-rows"></div>
+                    </fieldset>
+                </div>
+            </div>
         </section>
 
         <!-- Somebody who came into a match that is already going on: pick a team and a role to join it -->
