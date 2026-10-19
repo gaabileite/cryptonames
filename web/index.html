@@ -79,6 +79,10 @@
 
             <div class="wait-layout">
                 <div class="wait-main">
+                    <div id="movers" class="movers" hidden>
+                        <span class="note">Players</span>
+                        <span id="mover-list" class="mover-list"></span>
+                    </div>
                     <div id="teams" class="teams"></div>
                     <div class="wait-actions">
                         <button id="ready-btn" type="button" class="primary" aria-pressed="false">I'm ready</button>
@@ -87,11 +91,17 @@
                 </div>
 
                 <div class="wait-side">
-                    <fieldset class="universes">
+                    <!-- Only the host (the creator of the room) sees this switch -->
+                    <label id="edit-switch" class="switch-row" hidden>
+                        <input id="all-can-edit" type="checkbox" role="switch">
+                        <span class="switch-track" aria-hidden="true"></span>
+                        <span>All can edit</span>
+                    </label>
+                    <fieldset id="universes-box" class="universes">
                         <legend>Universes</legend>
                         <div id="universe-list" class="universe-list"></div>
                     </fieldset>
-                    <fieldset class="timer-setup">
+                    <fieldset id="timers-box" class="timer-setup">
                         <legend>Time limits</legend>
                         <div id="timer-rows" class="timer-rows"></div>
                     </fieldset>

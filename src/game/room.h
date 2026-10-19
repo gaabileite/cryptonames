@@ -39,6 +39,11 @@ struct NotInRoom : runtime_error {
     using runtime_error::runtime_error;
 };
 
+// The player is in the room but may not do this: only the host can change the room when "all can edit" is off.
+struct NotAllowed : runtime_error {
+    using runtime_error::runtime_error;
+};
+
 // The action does not fit the stage the room is in: for example, picking a seat after the match has started.
 struct WrongStage : runtime_error {
     using runtime_error::runtime_error;
@@ -64,7 +69,11 @@ enum class JoinChoice { UNDECIDED, PLAY, WAIT };
 // change their mind with setWaiting() until the match is over. When it is over, anybody in the room can call newGame(),
 // and everybody goes back to the waiting room (no seats, nobody ready) to start another match.
 // No input/output here, so any interface can drive it. Not thread safe: whoever shares a Room between threads locks it.
-// Anything not allowed throws invalid_argument (a rule), WrongStage (not at this moment) or NotInRoom (unknown token).
+// Anything not allowed throws invalid_argument (a rule), WrongStage (not at this moment), NotInRoom (unknown token) or
+// NotAllowed (a player who may not change the room: see setAllCanEdit).
+// The first player of a room is its host (creator). The host decides, with setAllCanEdit, whether every player can change
+// the room's settings (universes, time limits) and the seats of the other players, or only the host can. Choosing your own
+// seat and pressing ready are always allowed.
 class Room {
     public:
         typedef Match::Clock Clock;
@@ -89,6 +98,13 @@ class Room {
         void requireWaitingRoom() const {
             if (currentMatch) {
                 throw WrongStage("The game has already started");
+            }
+        }
+
+        // The room's settings and the seats of the others can only be changed by the host, unless all can edit.
+        void requireEditor(const string& token) const {
+            if (!lobby.canEdit(member(token).name)) {
+                throw NotAllowed("Only the host can change this");
             }
         }
 
@@ -160,8 +176,15 @@ class Room {
 
         // In the waiting room the seat can be changed until the player is ready. A player who came in during the match
         // and chose to play has no seat yet and takes one, once: it is theirs until the end.
-        void chooseSeat(const string& token, Team team, Role role) {
+        // `player` is somebody else: put them in that seat (waiting room only, and only for a player who may edit the room).
+        void chooseSeat(const string& token, Team team, Role role, const optional<string>& player = nullopt) {
             const Member& chooser = member(token);
+            if (player && *player != chooser.name) {
+                requireWaitingRoom();
+                requireEditor(token);
+                lobby.assignSeat(*player, team, role);          // throws if nobody in the room has that name
+                return;
+            }
             if (!currentMatch) {
                 lobby.chooseSeat(chooser.name, team, role);
                 return;
@@ -225,7 +248,7 @@ class Room {
         // Switches one universe on or off. At least 25 characters must stay selected.
         void setUniverse(const string& token, M_Universe universe, bool selected) {
             requireWaitingRoom();
-            member(token);
+            requireEditor(token);
             if (!catalog.universeSizes.count(universe)) {
                 throw invalid_argument("There are no characters in " + toString(universe));
             }
@@ -247,7 +270,7 @@ class Room {
         // They come as a long long so that a huge number cannot wrap around into a valid one.
         void setTimer(const string& token, TimerPhase phase, bool enabled, optional<long long> seconds) {
             requireWaitingRoom();
-            member(token);
+            requireEditor(token);
             int chosen = lobby.timer(phase).seconds;
             if (seconds) {
                 if (*seconds < Lobby::minTurnSeconds || *seconds > Lobby::maxTurnSeconds) {
@@ -256,6 +279,20 @@ class Room {
                 chosen = (int)*seconds;
             }
             lobby.chooseTimer(phase, enabled, chosen);   // cancels everybody's ready if the setting changed
+        }
+
+        // The host decides whether every player can change the room (true) or only the host can (false).
+        void setAllCanEdit(const string& token, bool on) {
+            requireWaitingRoom();
+            if (!member(token).creator) {
+                throw NotAllowed("Only the host can change who can edit");
+            }
+            lobby.setAllCanEdit(on);
+        }
+
+        // Can this player change the room's settings and the seats of the others?
+        bool canEdit(const string& token) const {
+            return lobby.canEdit(member(token).name);
         }
 
         const Lobby& waitingRoom() const {

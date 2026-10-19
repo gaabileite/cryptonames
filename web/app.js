@@ -137,6 +137,8 @@
         storage.set('token', null);
         $('whoami').hidden = true;
         setRoomBadge(null);
+        moving = null;
+        lastWait = null;
         resetRendering();
         document.title = BASE_TITLE;
     }
@@ -412,6 +414,8 @@
     }
 
     let me = null;        // who I am in the waiting room, from the last state
+    let lastWait = null;  // the last lobby and player drawn, to draw them again when only the selection changes
+    let moving = null;    // the player somebody picked (with the chips) to put in a seat, or null
 
     function renderWait(lobby, you) {
         show('wait');
@@ -424,7 +428,31 @@
         const ready = players.filter((player) => player.ready).length;
         const coop = lobby.cooperative;
 
-        paintSeats(waitSeats, players, coop, you, { showReady: true, locked: you.ready });      // locked while I am ready
+        lastWait = { lobby, you };
+        if (moving && !players.some((player) => player.name === moving)) moving = null;           // that player left
+        const movingOther = moving !== null && moving !== you.name;
+        paintSeats(waitSeats, players, coop, you, { showReady: true, locked: you.ready && !movingOther });   // my own seat is locked while I am ready
+        $('teams').classList.toggle('moving', movingOther);
+
+        // The host's switch, and the chips to move the other players (only for somebody who can edit the room)
+        $('edit-switch').hidden = !you.creator;
+        $('all-can-edit').checked = lobby.allCanEdit;
+        $('movers').hidden = !lobby.youCanEdit;
+        $('mover-list').replaceChildren(...players.map((player) => {
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = `pchip${player.name === moving ? ' selected' : ''}${player.team ? '' : ' unseated'}`;
+            chip.textContent = player.name;                               // textContent: a name can never inject HTML
+            chip.dataset.name = player.name;
+            chip.setAttribute('aria-pressed', player.name === moving ? 'true' : 'false');
+            chip.title = 'Pick this player, then pick a seat to move them there';
+            return chip;
+        }));
+        // What only the host can change is dimmed for the others
+        for (const box of [$('universes-box'), $('timers-box')]) {
+            box.disabled = !lobby.youCanEdit;
+            box.title = lobby.youCanEdit ? '' : 'Only the host can change this';
+        }
 
         // Only one short message, and only when something stops the game from starting (the server words it)
         $('wait-issue').textContent = lobby.missing || '';
@@ -464,7 +492,24 @@
     $('teams').addEventListener('click', (event) => {
         const button = event.target.closest('button.slot');
         if (!button || button.disabled) return;
-        waitAction(() => api('POST', '/api/seat', { team: button.dataset.team, role: button.dataset.role })).catch(() => {});
+        const body = { team: button.dataset.team, role: button.dataset.role };
+        if (moving && me && moving !== me.name) body.player = moving;       // moving somebody else, not myself
+        moving = null;
+        waitAction(() => api('POST', '/api/seat', body)).catch(() => {});
+    });
+
+    // Pick a player (click again to let go), then pick a seat
+    $('mover-list').addEventListener('click', (event) => {
+        const chip = event.target.closest('button.pchip');
+        if (!chip || !lastWait) return;
+        moving = moving === chip.dataset.name ? null : chip.dataset.name;
+        delete lastRendered.wait;
+        renderWait(lastWait.lobby, lastWait.you);
+    });
+
+    // The host decides whether everybody can edit the room
+    $('all-can-edit').addEventListener('change', (event) => {
+        waitAction(() => api('POST', '/api/edit-rights', { allCanEdit: event.target.checked })).catch(() => {});
     });
 
     $('ready-btn').addEventListener('click', () => {

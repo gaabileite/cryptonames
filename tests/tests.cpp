@@ -1007,6 +1007,99 @@ void testRoomMatch() {
     }
 }
 
+void testHost() {
+    {   // the first player of a lobby is its creator, and the player class says so
+        Lobby lobby;
+        lobby.join("Ana"); lobby.join("Bia"); lobby.join("Cris");
+        CHECK(lobby.members()[0].creator && !lobby.members()[1].creator && !lobby.members()[2].creator);
+        lobby.chooseSeat("Ana", Team::BLUE, Role::SPY); lobby.chooseSeat("Bia", Team::BLUE, Role::GUESSER);
+        vector<Player> players = lobby.players();
+        CHECK(players.size() == 2 && players[0].creator && !players[1].creator);
+        CHECK(lobby.allCanEdit() && lobby.canEdit("Ana") && lobby.canEdit("Bia") && !lobby.canEdit("Nobody"));   // everybody, by default
+        lobby.setAllCanEdit(false);
+        CHECK(lobby.canEdit("Ana") && !lobby.canEdit("Bia") && !lobby.canEdit("Cris"));                         // only the host
+        lobby.setAllCanEdit(true);
+        CHECK(lobby.canEdit("Cris"));
+        // the host leaves: the player who has been in the room the longest takes over
+        lobby.leave("Ana");
+        CHECK(lobby.members()[0].name == "Bia" && lobby.members()[0].creator && !lobby.members()[1].creator);
+        lobby.leave("Cris");                                                      // a player who is not the host: nothing changes
+        CHECK(lobby.members().size() == 1 && lobby.members()[0].creator);
+        lobby.leave("Bia");
+        lobby.join("New");                                                        // an empty lobby: the next one is the creator
+        CHECK(lobby.members()[0].creator);
+        // the console way of adding players
+        Lobby console = fullLobby();
+        CHECK(console.players()[0].creator && !console.players()[1].creator && !console.players()[3].creator);
+        // assignSeat: another player's seat, and their ready is cancelled
+        Lobby seats;
+        seats.join("A"); seats.join("B");
+        seats.chooseSeat("B", Team::RED, Role::SPY); seats.setReady("B", true);
+        seats.assignSeat("B", Team::BLUE, Role::GUESSER);
+        CHECK(*seats.members()[1].seat == Slot(Team::BLUE, Role::GUESSER) && !seats.members()[1].ready);
+        seats.assignSeat("A", Team::RED, Role::SPY);                              // somebody with no seat yet
+        CHECK(*seats.members()[0].seat == Slot(Team::RED, Role::SPY));
+        CHECK(rejects([&] { seats.assignSeat("Nobody", Team::RED, Role::SPY); }));
+    }
+    Catalog catalog = twoUniverses();
+    {   // all can edit (the default): anybody changes the settings and the seats of the others
+        Room room("HOST1", catalog);
+        string ana = room.join("Ana"), bia = room.join("Bia");
+        CHECK(room.canEdit(ana) && room.canEdit(bia));
+        room.setUniverse(bia, M_Universe::MCU, false);
+        room.setTimer(bia, TimerPhase::CLUE, true, 45);
+        room.chooseSeat(bia, Team::BLUE, Role::SPY, string("Ana"));                // Bia puts Ana in a seat
+        CHECK(*room.member(ana).seat == Slot(Team::BLUE, Role::SPY) && !room.member(bia).seat);
+    }
+    {   // all can edit off: the host edits, the others can only choose their own seat
+        Room room("HOST2", catalog);
+        string ana = room.join("Ana"), bia = room.join("Bia"), cris = room.join("Cris");
+        CHECK(throwsType<NotAllowed>([&] { room.setAllCanEdit(bia, false); }));    // only the host has the switch
+        room.setAllCanEdit(ana, false);
+        CHECK(!room.waitingRoom().allCanEdit() && room.canEdit(ana) && !room.canEdit(bia));
+        CHECK(throwsType<NotAllowed>([&] { room.setUniverse(bia, M_Universe::MCU, false); }));
+        CHECK(throwsType<NotAllowed>([&] { room.setTimer(bia, TimerPhase::GUESS, true, 60); }));
+        CHECK(throwsType<NotAllowed>([&] { room.chooseSeat(bia, Team::RED, Role::SPY, string("Cris")); }));      // another player's seat
+        CHECK(room.waitingRoom().universes().size() == 2 && !room.waitingRoom().timer(TimerPhase::GUESS).enabled && !room.member(cris).seat);   // nothing changed
+        room.chooseSeat(bia, Team::RED, Role::SPY);                                // their own seat: always
+        room.chooseSeat(bia, Team::RED, Role::GUESSER, string("Bia"));             // naming themselves is the same thing
+        CHECK(*room.member(bia).seat == Slot(Team::RED, Role::GUESSER));
+        room.setReady(bia, true);                                                  // and ready
+        CHECK(room.member(bia).ready);
+        // the host edits everything
+        room.setUniverse(ana, M_Universe::MCU, false);
+        room.setTimer(ana, TimerPhase::GUESS, true, 60);
+        room.chooseSeat(ana, Team::BLUE, Role::SPY, string("Cris"));
+        CHECK(*room.member(cris).seat == Slot(Team::BLUE, Role::SPY));
+        room.chooseSeat(ana, Team::BLUE, Role::GUESSER, string("Bia"));            // moving a ready player cancels their ready
+        CHECK(*room.member(bia).seat == Slot(Team::BLUE, Role::GUESSER) && !room.member(bia).ready);
+        CHECK(rejects([&] { room.chooseSeat(ana, Team::BLUE, Role::GUESSER, string("Nobody")); }));
+        CHECK(throwsType<NotAllowed>([&] { room.setAllCanEdit(cris, true); }));
+        room.setAllCanEdit(ana, true);                                             // and turns it back on
+        room.setUniverse(cris, M_Universe::MCU, true);
+        CHECK(room.waitingRoom().universes().size() == 2);
+        // the host leaves with the switch off: the next player in line becomes the host and has the rights
+        room.setAllCanEdit(ana, false);
+        room.leave(ana);
+        CHECK(room.member(bia).creator && room.canEdit(bia) && !room.canEdit(cris));
+        room.setUniverse(bia, M_Universe::MCU, false);
+        CHECK(throwsType<NotAllowed>([&] { room.setUniverse(cris, M_Universe::MCU, true); }));
+    }
+    {   // during a match nothing of this applies, and a new game keeps the host and the setting
+        Room room("HOST3", catalog);
+        map<string, string> t = fillRoom(room, false);                             // "bs" came first: the host
+        room.setAllCanEdit(t["bs"], false);
+        for (string name : {"bs", "bg", "rs", "rg"}) room.setReady(t[name], true);
+        CHECK(room.started());
+        CHECK(throwsType<WrongStage>([&] { room.setAllCanEdit(t["bs"], true); }));
+        CHECK(throwsType<WrongStage>([&] { room.chooseSeat(t["bs"], Team::RED, Role::SPY, string("rg")); }));
+        CHECK(room.match().players()[0].creator && !room.match().players()[1].creator);   // the match's players know who the host is
+        room.match().forfeit("rg");
+        room.newGame(t["bg"]);
+        CHECK(!room.waitingRoom().allCanEdit() && room.member(t["bs"]).creator && !room.canEdit(t["bg"]));
+    }
+}
+
 void testRoomRegistry() {
     Catalog catalog = twoUniverses();
     typedef RoomRegistry::Clock Clock;
@@ -1020,12 +1113,14 @@ void testRoomRegistry() {
         const string code = first.room->code();
         CHECK(code.size() == 5 && code.find_first_not_of(letters) == string::npos);
         CHECK(first.room->member(first.token).name == "Ana" && rooms.size() == 1 && rooms.contains(code));
+        CHECK(first.room->member(first.token).creator);                      // whoever makes the room is its host
         CHECK(&rooms.roomOf(first.token) == first.room);
         CHECK(rejects([&] { rooms.create("   "); }) && rooms.size() == 1);   // a rejected name leaves no room behind
 
         // joining: the code can be typed any way
         RoomRegistry::Entry second = rooms.join("  " + string(1, (char)tolower(code[0])) + code.substr(1, 2) + "-" + code.substr(3) + " ", "Bia");
         CHECK(second.room == first.room && rooms.roomOf(second.token).member(second.token).name == "Bia");
+        CHECK(!second.room->member(second.token).creator);                   // a player who joins is not
         CHECK(throwsType<NoSuchRoom>([&] { rooms.join("00000", "Cris"); }));      // zeros are never in a code
         CHECK(throwsType<NoSuchRoom>([&] { rooms.join("", "Cris"); }));
         CHECK(rejects([&] { rooms.join(code, "Ana"); }));                    // the name is taken in that room
@@ -1388,6 +1483,7 @@ int main() {
     run("clues", testClues);
     run("room", testRoom);
     run("room match", testRoomMatch);
+    run("host", testHost);
     run("room registry", testRoomRegistry);
     run("grid", testGrid);
     run("match setup and views", testMatchSetupAndViews);

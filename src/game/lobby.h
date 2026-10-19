@@ -26,11 +26,14 @@ enum class TimerPhase { CLUE, GUESS };
 // Someone in the waiting room. The seat stays empty until they pick a team and a role.
 // `waiting` is for somebody who came into a room while a match was going on and chose to wait for the next game
 // instead of joining it (see Room): they have no seat and are not asked to pick one.
+// `creator` is the host: the first player of the room. If the host leaves, the player who has been in the room the longest
+// becomes the host, so the room always has one.
 struct Member {
     string name;
     optional<Slot> seat;
     bool ready = false;
     bool waiting = false;
+    bool creator = false;
 };
 
 // First step of the game: the waiting room. No input/output here, so any interface (console, web, ...) can drive it.
@@ -40,6 +43,9 @@ struct Member {
 //   setReady(name, ready)      -> (un)mark yourself as ready; needs a seat
 //   chooseUniverses(set)       -> which universes the characters of the match come from (cancels everybody's ready)
 //   chooseTimer(phase, on, seconds) -> whether the clue / the guessing has a time limit, and how long (cancels everybody's ready)
+//   setAllCanEdit(on)          -> on: any player can change the room (universes, time limits, other players' seats);
+//                                 off: only the host (creator) can. A player can always choose their own seat.
+//   assignSeat(name, team, role) -> put another player in a seat (cancels that player's ready)
 //   missing()                  -> what the players still have to fix before a match could start ("" when nothing)
 //   canStart()                 -> nothing is missing and everybody is ready: the match can begin
 // Anything not allowed throws invalid_argument with a message that can be shown to the player.
@@ -52,6 +58,7 @@ class Lobby {
         set<M_Universe> chosen;          // the universes the match draws its characters from
         TimeLimit clueLimit;             // both off until somebody turns them on
         TimeLimit guessLimit;
+        bool everyoneEdits = true;       // may every player change the room, or only the host?
 
         // Players with this seat (team and role).
         int seated(Team team, Role role) const {
@@ -117,8 +124,34 @@ class Lobby {
         // to play, so everybody's ready is cancelled.
         void join(string name, bool waiting = false) {
             string clean = checkNewName(name);
+            bool first = joined.empty();               // whoever is first in the room is its creator
             cancelEveryonesReady();
-            joined.push_back(Member{clean, nullopt, false, waiting});
+            joined.push_back(Member{clean, nullopt, false, waiting, first});
+        }
+
+        // Can this player change the room's settings and the seats of the others? The host always can; the rest only when
+        // the host let everybody edit.
+        bool canEdit(const string& name) const {
+            for (const Member& member : joined) {
+                if (member.name == name) return member.creator || everyoneEdits;
+            }
+            return false;
+        }
+
+        bool allCanEdit() const {
+            return everyoneEdits;
+        }
+
+        void setAllCanEdit(bool on) {
+            everyoneEdits = on;
+        }
+
+        // Puts a player in a seat, whoever asks (the caller checks that they may). Their ready is cancelled, because the
+        // seat they agreed to is not the one they have now.
+        void assignSeat(const string& name, Team team, Role role) {
+            Member& member = find(name);
+            member.seat = Slot(team, role);
+            member.ready = false;
         }
 
         // Marks somebody as waiting for the next game (or not).
@@ -141,7 +174,9 @@ class Lobby {
             find(name);                      // throws if there is nobody with this name
             for (size_t i = 0; i < joined.size(); i++) {
                 if (joined[i].name == name) {
+                    bool wasHost = joined[i].creator;
                     joined.erase(joined.begin() + i);
+                    if (wasHost && !joined.empty()) joined.front().creator = true;   // the longest in the room takes over
                     break;
                 }
             }
@@ -221,7 +256,8 @@ class Lobby {
         // Joins, picks the seat and is ready, all at once (for the console, where there is no waiting room).
         void addPlayer(string name, Team team, Role role) {
             name = checkNewName(name);
-            joined.push_back(Member{name, Slot(team, role), true});
+            bool first = joined.empty();
+            joined.push_back(Member{name, Slot(team, role), true, false, first});
         }
 
         // Same as above, for interfaces that send the choices as text (e.g. JSON from a front-end).
@@ -259,7 +295,7 @@ class Lobby {
         vector<Player> players() const {
             vector<Player> seated;
             for (const Member& member : joined) {
-                if (member.seat) seated.push_back(Player(member.name, member.seat->first, member.seat->second));
+                if (member.seat) seated.push_back(Player(member.name, member.seat->first, member.seat->second, member.creator));
             }
             return seated;
         }

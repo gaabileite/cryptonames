@@ -23,14 +23,20 @@
 //                           cannot play before that. "wait": they stay in the room's waiting room for the next game
 //                           ("waiting": true). Once the match is over nobody has anything to join: they just wait.
 // Waiting room (until every seat is taken and everybody is ready, then the match starts by itself):
-//   GET  /api/lobby      the room code, who is in the waiting room (team and role are null until picked, plus "ready"),
+//   GET  /api/lobby      the room code, who is in the waiting room (team and role are null until picked, plus "ready" and
+//                        "creator", the host), "allCanEdit" and whether YOU can edit ("youCanEdit"),
 //                        how many players a game takes (2 to 10), whether the game would be co-operative (fewer than 4
 //                        players), what is "missing" before a match could start (null when nothing), the universes
 //                        with their character count and whether they are selected, and the time limits   (X-Token)
 //   POST /api/seat       {"team", "role"} picks or changes your seat; any number of players can take the same one;
-//                        not while ready. During a match only a newcomer without a seat can use it, once (in a
-//                        co-operative game the answer shows the team they really got: BLUE)   (X-Token)
-//   POST /api/universes  {"universe": "MCU", "selected": true|false} switches one universe on or off; cancels everybody's ready (X-Token)
+//                        not while ready. With "player": "Name" it puts that other player in the seat instead (and
+//                        cancels their ready): only the host, or anybody when "all can edit" is on. During a match
+//                        only a newcomer without a seat can use it, once (in a co-operative game the answer shows
+//                        the team they really got: BLUE)                                   (X-Token)
+//   POST /api/edit-rights {"allCanEdit": true|false} the host decides whether every player can change the room (universes,
+//                        time limits, the seats of the others) or only the host can. Anyone else gets 403  (X-Token)
+//   POST /api/universes  {"universe": "MCU", "selected": true|false} switches one universe on or off; cancels everybody's ready;
+//                        403 for a player who may not edit the room                         (X-Token)
 //   POST /api/timer      {"phase": "clue"|"guess", "enabled": true|false, "seconds": 15-600} the time limit of the clue or
 //                        of the guessing; cancels everybody's ready                       (X-Token)
 //   POST /api/ready      {"ready": true|false}                                             (X-Token)
@@ -117,7 +123,8 @@ bool booleanField(const json& body, const string& field) {
 
 // team and role are null while the player has not picked a seat.
 json memberJson(const Member& member) {
-    json answer = {{"name", member.name}, {"team", nullptr}, {"role", nullptr}, {"ready", member.ready}, {"waiting", member.waiting}};
+    json answer = {{"name", member.name}, {"team", nullptr}, {"role", nullptr}, {"ready", member.ready}, {"waiting", member.waiting},
+                   {"creator", member.creator}};
     if (member.seat) {
         answer["team"] = toString(member.seat->first);
         answer["role"] = toString(member.seat->second);
@@ -177,6 +184,9 @@ httplib::Server::Handler endpoint(function<json(const httplib::Request&)> action
         } catch (const MatchInProgress& e) {
             status = 409;
             answer = {{"error", e.what()}, {"matchInProgress", true}, {"cooperative", e.cooperative}, {"players", e.players}};
+        } catch (const NotAllowed& e) {
+            status = 403;
+            answer = {{"error", e.what()}};
         } catch (const NoSuchRoom& e) {
             status = 404;
             answer = {{"error", e.what()}};
@@ -290,6 +300,7 @@ int main(int argc, char* argv[]) {
                     {"minPlayers", Lobby::minPlayers}, {"maxPlayers", Lobby::maxPlayers},
                     {"teamGameMinPlayers", Lobby::teamGameMinPlayers}, {"cooperative", lobby.cooperative()},
                     {"missing", missing.empty() ? json(nullptr) : json(missing)}, {"players", players},
+                    {"allCanEdit", lobby.allCanEdit()}, {"youCanEdit", in.room.canEdit(in.token)},
                     {"universes", universesJson(in.room)},
                     {"charactersSelected", in.room.characters().charactersIn(lobby.universes())},
                     {"charactersNeeded", Catalog::cardsOnBoard}, {"timers", timersJson(in.room)}};
@@ -298,8 +309,12 @@ int main(int argc, char* argv[]) {
     server.Post("/api/seat", endpoint([](const httplib::Request& req) {
         json body = bodyOf(req);
         Visitor in = visitorOf(req);
-        in.room.chooseSeat(in.token, teamFromString(textField(body, "team")), roleFromString(textField(body, "role")));
-        return memberJson(in.room.member(in.token));
+        optional<string> player;                       // somebody else's seat, when the host (or anybody) edits the room
+        if (body.contains("player")) player = textField(body, "player");
+        in.room.chooseSeat(in.token, teamFromString(textField(body, "team")), roleFromString(textField(body, "role")), player);
+        return player ? memberJson(*find_if(in.room.waitingRoom().members().begin(), in.room.waitingRoom().members().end(),
+                                            [&](const Member& m) { return m.name == *player; }))
+                      : memberJson(in.room.member(in.token));
     }));
 
     server.Post("/api/universes", endpoint([](const httplib::Request& req) {
@@ -310,6 +325,13 @@ int main(int argc, char* argv[]) {
         return json{{"universes", universesJson(in.room)},
                     {"charactersSelected", in.room.characters().charactersIn(in.room.waitingRoom().universes())},
                     {"charactersNeeded", Catalog::cardsOnBoard}};
+    }));
+
+    server.Post("/api/edit-rights", endpoint([](const httplib::Request& req) {
+        json body = bodyOf(req);
+        Visitor in = visitorOf(req);
+        in.room.setAllCanEdit(in.token, booleanField(body, "allCanEdit"));
+        return json{{"allCanEdit", in.room.waitingRoom().allCanEdit()}};
     }));
 
     server.Post("/api/timer", endpoint([](const httplib::Request& req) {
