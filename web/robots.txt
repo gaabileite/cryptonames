@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /api/
 
-Sitemap: https://cryptonames.fly.dev/sitemap.xml
+Sitemap: https://playcryptonames.cc/sitemap.xml

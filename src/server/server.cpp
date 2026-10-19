@@ -4,6 +4,9 @@
 // Run:   build/server [port] [host]      (defaults: 8080 127.0.0.1) - run it from the project folder.
 //        Hosting services say which port to use in the PORT environment variable: when no port is given, PORT is used,
 //        and then the default host is 0.0.0.0 (reachable from outside the container) instead of 127.0.0.1.
+//        CANONICAL_HOST (for example playcryptonames.cc) is the game's own address: a page request that arrives through
+//        another name of the same server (www.<it>, or a *.fly.dev address) is sent there with a permanent redirect, so
+//        search engines see a single site. /healthz (for the host's health check) and /api/ are never redirected.
 //
 // Every endpoint answers JSON. A rejected action answers {"error": "..."} with a 4xx status.
 // A room has a random code. A player makes a room or enters one with its code, and gets a secret token; from then on
@@ -432,6 +435,28 @@ int main(int argc, char* argv[]) {
         in.room.match().forfeit(in.you.name);
         return json{{"ok", true}};
     }));
+
+    // For the host's health check: a plain answer, whatever name it asks through
+    server.Get("/healthz", [](const httplib::Request&, httplib::Response& res) {
+        res.set_content("ok", "text/plain");
+    });
+
+    // The game's own address, if the host has one: the other names of the server send visitors there
+    const char* canonicalText = getenv("CANONICAL_HOST");
+    if (canonicalText != nullptr && canonicalText[0] != '\0') {
+        const string canonical = canonicalText;
+        server.set_pre_routing_handler([canonical](const httplib::Request& req, httplib::Response& res) {
+            string host = req.get_header_value("Host");
+            host = host.substr(0, host.find(':'));                           // without the port
+            for (char& c : host) c = (char)tolower((unsigned char)c);
+            bool other = host == "www." + canonical || (host.size() > 8 && host.compare(host.size() - 8, 8, ".fly.dev") == 0);
+            bool page = (req.method == "GET" || req.method == "HEAD") && req.path != "/healthz" && req.path.rfind("/api/", 0) != 0;
+            if (!other || !page) return httplib::Server::HandlerResponse::Unhandled;
+            res.status = 301;
+            res.set_header("Location", "https://" + canonical + req.target);
+            return httplib::Server::HandlerResponse::Handled;
+        });
+    }
 
     server.set_mount_point("/images", "assets/images");
     if (filesystem::is_directory("web")) {

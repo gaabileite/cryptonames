@@ -1,33 +1,31 @@
-# fly.toml app configuration file generated for cryptonames on 2026-10-19T12:15:41-03:00
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
-
-app = 'cryptonames'
-primary_region = 'iad'
+# Fly.io settings for CryptoNames. Deploy with: fly deploy --ha=false   (see the README)
+# The rooms live in the server's memory, so there must be exactly ONE machine, and it must never sleep.
+# Note: the Fly command line may rewrite this file when it deploys; keep the settings below.
+app = "cryptonames"          # the app name on Fly (its address there is cryptonames.fly.dev)
+primary_region = "iad"       # US East (Virginia)
 
 [build]
-  dockerfile = 'Dockerfile'
+  dockerfile = "Dockerfile"
 
 [env]
-  PORT = '8080'
+  PORT = "8080"
+  CANONICAL_HOST = "playcryptonames.cc"   # the game's own address: cryptonames.fly.dev and www.* redirect to it
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = 'off'
+  auto_stop_machines = "off"       # a stopped machine would lose every room
   auto_start_machines = false
   min_machines_running = 1
 
   [[http_service.checks]]
-    interval = '30s'
-    timeout = '5s'
-    grace_period = '5s'
-    method = 'GET'
-    path = '/'
+    method = "GET"
+    path = "/healthz"              # never redirected, whatever name the check asks through
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "5s"
 
 [[vm]]
-  memory = '256mb'
-  cpu_kind = 'shared'
+  cpu_kind = "shared"
   cpus = 1
-  memory_mb = 256
+  memory = "256mb"

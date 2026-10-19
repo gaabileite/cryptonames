@@ -2,7 +2,7 @@
 
 # CryptoNames
 
-**Play it online: https://cryptonames.fly.dev**
+**Play it online: https://playcryptonames.cc**
 
 A spy game played on a 5x5 grid of Marvel character cards, with 2 to 10 players. With 4 or more players it is BLUE against RED, and each team has at least one SPY and one GUESSER (a team can have several of each). With only 2 or 3 players it is a **co-operative game** (see below). Spies see the colour of every card (BLUE, RED, BEIGE or BLACK); guessers see every card as BEIGE until it is revealed.
 
@@ -86,9 +86,13 @@ Rooms live in the server's memory, so run **exactly one** copy and never let it 
 
 To try the image on your computer: `docker build -t cryptonames .` and `docker run -p 8080:8080 cryptonames`, then open http://localhost:8080.
 
+### The domain
+
+`playcryptonames.cc` is registered at Cloudflare, which also hosts its DNS. The records, all set to *DNS only* (grey cloud, so Fly can issue the HTTPS certificate), are `A` and `AAAA` for `@` and for `www`, pointing at the app's addresses (`fly ips list`). The certificates are made with `fly certs add playcryptonames.cc` and `fly certs add www.playcryptonames.cc` (`fly certs list` shows their state).
+
 ### Fly.io (region: US East, Virginia)
 
-The game is deployed this way at https://cryptonames.fly.dev. A Fly trial account stops machines after 5 minutes: add a payment method on the account (https://fly.io/trial) or the game goes offline.
+The game is deployed this way at https://playcryptonames.cc (the Fly app is called `cryptonames`, so it also answers at cryptonames.fly.dev). A Fly trial account stops machines after 5 minutes: add a payment method on the account (https://fly.io/trial) or the game goes offline.
 
 `fly.toml` is already set up for one always-on machine in Virginia (`iad`). In the Fly dashboard use **Apps**, not Sprites (Sprites is a different product). From this folder:
 
@@ -102,7 +106,7 @@ fly open                            # opens the game's address (https://<app>.fl
 
 To update after a change: `fly deploy --ha=false` again (this closes the open rooms). `fly logs` shows what the server prints, and `fly scale count 1` makes sure there is only one machine.
 
-The address `https://cryptonames.fly.dev` also appears in `web/index.html` (the canonical link and the share tags), `web/robots.txt` and `web/sitemap.xml`: change those if the game gets another address. `web/google47bc8078b02ff9fb.html` is the file Google Search Console uses to confirm the site is yours; keep it. `web/brand/share.png` is the picture shown when a link to the game is shared.
+The game's address, `https://playcryptonames.cc`, appears in `web/index.html` (the canonical link and the share tags), `web/robots.txt`, `web/sitemap.xml` and as `CANONICAL_HOST` in `fly.toml`: change all of them if the game gets another address. With `CANONICAL_HOST` set, a page request that arrives through `www.playcryptonames.cc` or `cryptonames.fly.dev` is redirected (permanently, keeping the path and the `?room=` invite code) to the main address, so search engines see one site; `/healthz` and `/api/` are never redirected. The Fly command line may rewrite `fly.toml` when it deploys, so look at `git diff` before committing it. `web/google47bc8078b02ff9fb.html` is the file Google Search Console uses to confirm the site is yours; keep it. `web/brand/share.png` is the picture shown when a link to the game is shared.
 
 For players far from Virginia, put Cloudflare (free plan) in front of the app's domain: it caches the page and the card pictures near each player.
 
