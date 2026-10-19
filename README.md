@@ -2,6 +2,8 @@
 
 # CryptoNames
 
+**Play it online: https://cryptonames.fly.dev**
+
 A spy game played on a 5x5 grid of Marvel character cards, with 2 to 10 players. With 4 or more players it is BLUE against RED, and each team has at least one SPY and one GUESSER (a team can have several of each). With only 2 or 3 players it is a **co-operative game** (see below). Spies see the colour of every card (BLUE, RED, BEIGE or BLACK); guessers see every card as BEIGE until it is revealed.
 
 ## Layout
@@ -14,7 +16,7 @@ A spy game played on a 5x5 grid of Marvel character cards, with 2 to 10 players.
 | `src/server/` | The HTTP server (JSON API) a front-end talks to. The endpoints are listed at the top of `server.cpp`. |
 | `tests/` | Tests for the game rules. |
 | `data/` | `characters.db`, the characters table. |
-| `assets/brand/` | The original logo and wordmark of CryptoNames. The web-sized versions and the favicons are in `web/brand/`. |
+| `assets/brand/` | The original logo and wordmark of CryptoNames, and `logo-transparent-source.png`, the logo with a transparent background that the tab icons are made from. The web-sized versions and the favicons are in `web/brand/`. |
 | `assets/images/` | The four coloured cards of each character: `<universe>/<character>/{blue,red,beige,black}.png`. |
 | `third_party/` | Single-header libraries: cpp-httplib and nlohmann/json (both MIT). |
 | `Dockerfile`, `fly.toml` | To host the server online (see *Hosting it online*). |
@@ -85,6 +87,8 @@ Rooms live in the server's memory, so run **exactly one** copy and never let it 
 To try the image on your computer: `docker build -t cryptonames .` and `docker run -p 8080:8080 cryptonames`, then open http://localhost:8080.
 
 ### Fly.io (region: US East, Virginia)
+
+The game is deployed this way at https://cryptonames.fly.dev. A Fly trial account stops machines after 5 minutes: add a payment method on the account (https://fly.io/trial) or the game goes offline.
 
 `fly.toml` is already set up for one always-on machine in Virginia (`iad`). In the Fly dashboard use **Apps**, not Sprites (Sprites is a different product). From this folder:
 
