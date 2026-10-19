@@ -2,6 +2,8 @@
 //
 // Build: make server
 // Run:   build/server [port] [host]      (defaults: 8080 127.0.0.1) - run it from the project folder.
+//        Hosting services say which port to use in the PORT environment variable: when no port is given, PORT is used,
+//        and then the default host is 0.0.0.0 (reachable from outside the container) instead of 127.0.0.1.
 //
 // Every endpoint answers JSON. A rejected action answers {"error": "..."} with a 4xx status.
 // A room has a random code. A player makes a room or enters one with its code, and gets a secret token; from then on
@@ -50,6 +52,8 @@
 // they all picked the same one, a random player takes the other), and the team wins by finding all the BLUE cards.
 // /images/... serves assets/images/ (the card pictures) and, if a web/ folder exists, / serves the front-end.
 #include <algorithm>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <mutex>
 #include <functional>
@@ -193,18 +197,21 @@ httplib::Server::Handler endpoint(function<json(const httplib::Request&)> action
 
 int main(int argc, char* argv[]) {
     int port = 8080;
-    if (argc > 1) {
+    const char* portText = argc > 1 ? argv[1] : getenv("PORT");     // the argument wins over the environment
+    if (portText != nullptr) {
         try {
-            port = stoi(argv[1]);
+            size_t used = 0;
+            port = stoi(portText, &used);
+            if (used != strlen(portText)) port = -1;                 // "80abc" is not a port
         } catch (const exception&) {
             port = -1;
         }
         if (port < 1 || port > 65535) {
-            cerr << "Error: invalid port " << argv[1] << endl;
+            cerr << "Error: invalid port " << portText << endl;
             return 1;
         }
     }
-    string host = argc > 2 ? argv[2] : "127.0.0.1";
+    string host = argc > 2 ? argv[2] : (getenv("PORT") != nullptr ? "0.0.0.0" : "127.0.0.1");
 
     try {
         catalog = make_unique<Catalog>(loadCharacters(defaultDatabasePath));

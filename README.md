@@ -73,6 +73,30 @@ With fewer than 4 players there is no opposing team. When the game starts, an al
 
 Rooms live in the server's memory, so restarting the server closes them all. To let other devices on your network join, run `build/server 8080 0.0.0.0`.
 
+## Hosting it online
+
+GitHub Pages cannot host this game (it only serves static files and the game needs the server). Use a host that runs containers; the `Dockerfile` works on any of them (Fly.io, Railway, Render, or a VPS with Docker). The server reads the `PORT` variable the host gives it (and then listens on `0.0.0.0`).
+
+Rooms live in the server's memory, so run **exactly one** copy and never let it sleep or autoscale: a second copy would be a separate world, and a stop or a redeploy closes every room.
+
+To try the image on your computer: `docker build -t cryptonames .` and `docker run -p 8080:8080 cryptonames`, then open http://localhost:8080.
+
+### Fly.io (region: US East, Virginia)
+
+`fly.toml` is already set up for one always-on machine in Virginia (`iad`). In the Fly dashboard use **Apps**, not Sprites (Sprites is a different product). From this folder:
+
+```
+brew install flyctl                 # the Fly command line (macOS)
+fly auth login                      # opens the browser; Fly needs a payment method on the account
+fly launch --no-deploy --copy-config   # keeps fly.toml; if the app name "cryptonames" is taken, pick another
+fly deploy --ha=false               # builds the image on Fly and starts ONE machine
+fly open                            # opens the game's address (https://<app>.fly.dev)
+```
+
+To update after a change: `fly deploy --ha=false` again (this closes the open rooms). `fly logs` shows what the server prints, and `fly scale count 1` makes sure there is only one machine.
+
+For players far from Virginia, put Cloudflare (free plan) in front of the app's domain: it caches the page and the card pictures near each player.
+
 ## Database
 
 `image_path` in the `marvel` table is the character's picture folder as the front-end requests it (for example `images/mcu/iron_man_tony_stark`). The server serves it from `assets/images/`, and the card file is named after the key: `<image_path>/<key>.png`.
