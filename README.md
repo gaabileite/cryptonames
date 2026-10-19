@@ -102,6 +102,8 @@ fly open                            # opens the game's address (https://<app>.fl
 
 To update after a change: `fly deploy --ha=false` again (this closes the open rooms). `fly logs` shows what the server prints, and `fly scale count 1` makes sure there is only one machine.
 
+The address `https://cryptonames.fly.dev` also appears in `web/index.html` (the canonical link and the share tags), `web/robots.txt` and `web/sitemap.xml`: change those if the game gets another address. `web/google47bc8078b02ff9fb.html` is the file Google Search Console uses to confirm the site is yours; keep it. `web/brand/share.png` is the picture shown when a link to the game is shared.
+
 For players far from Virginia, put Cloudflare (free plan) in front of the app's domain: it caches the page and the card pictures near each player.
 
 ## Good to know

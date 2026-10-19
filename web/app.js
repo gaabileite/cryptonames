@@ -11,7 +11,7 @@
 
     const POLL_MS = 1500;
     const FLIP_MS = 220;      // each half of the card-turning animation
-    const BASE_TITLE = document.title;
+    const BASE_TITLE = 'CryptoNames';        // the tab title while playing (the page's own title is longer, for search engines)
     const TEAMS = ['BLUE', 'RED'];
     const ROLES = ['SPY', 'GUESSER'];
     const UNIVERSE_NAMES = { 'MCU': 'MCU', 'FOX X-MEN': 'Fox X-Men', 'SONY SPIDER-MAN': 'Sony Spider-Man', 'FANTASTIC FOUR': 'Fantastic Four', 'THROUGH THE SPIDERVERSE': 'Through the Spider-Verse', 'COMICS': 'Comics', 'VENOM': 'Venom' };
