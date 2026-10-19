@@ -161,6 +161,25 @@ input[type="text"] {
 /* The waiting room: the teams on the left and the settings on the right, so nothing needs scrolling on a computer */
 .wait-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 24px; margin-bottom: 16px; }
 .wait-head h2 { margin: 0; }
+.wait-head .screen-title { margin: 0; }
+
+/* The round arrow that goes back to the start page (and leaves the room) */
+.screen-title { display: flex; align-items: center; gap: 14px; margin: 8px 0 16px; }
+.screen-title h2 { margin: 0; }
+.back-btn {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+}
+.back-btn:hover { border-color: var(--text); }
 .wait-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px 32px; align-items: start; }
 .wait-main .teams { max-width: none; }
 .wait-side { display: grid; gap: 20px; }

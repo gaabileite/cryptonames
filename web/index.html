@@ -64,7 +64,10 @@
         <!-- Waiting room: pick (and change) team and role, then press ready -->
         <section id="screen-wait" hidden>
             <div class="wait-head">
+                <div class="screen-title">
+                <button id="leave-btn" type="button" class="back-btn" aria-label="Back to the start page (leaves the room)" title="Back to the start page (leaves the room)"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12H5M11 5l-7 7 7 7"/></svg></button>
                 <h2>Waiting room</h2>
+            </div>
                 <div class="room-code-box">
                     <span class="note">Room code</span>
                     <strong id="room-code" class="room-code"></strong>
@@ -80,7 +83,6 @@
                     <div class="wait-actions">
                         <button id="ready-btn" type="button" class="primary" aria-pressed="false">I'm ready</button>
                         <span id="ready-count" class="note"></span>
-                        <button id="leave-btn" type="button" class="link">Leave the waiting room</button>
                     </div>
                 </div>
 
@@ -99,25 +101,29 @@
 
         <!-- Somebody who came into a match that is already going on: pick a team and a role to join it -->
         <section id="screen-late" hidden>
-            <h2>Join the game in progress</h2>
+            <div class="screen-title">
+                <button id="late-leave" type="button" class="back-btn" aria-label="Back to the start page (leaves the room)" title="Back to the start page (leaves the room)"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12H5M11 5l-7 7 7 7"/></svg></button>
+                <h2>Join the game in progress</h2>
+            </div>
             <p id="late-intro" class="note"></p>
             <div id="late-teams" class="teams"></div>
             <p id="late-error" class="error" role="alert" hidden></p>
             <div class="wait-actions">
                 <button id="late-wait" type="button">Wait for the next game instead</button>
-                <button id="late-leave" type="button" class="link">Leave the room</button>
             </div>
         </section>
 
         <!-- Somebody who chose to wait for the next game, in a room whose match is going on (or just ended) -->
         <section id="screen-hold" hidden>
-            <h2>Waiting room</h2>
+            <div class="screen-title">
+                <button id="hold-leave" type="button" class="back-btn" aria-label="Back to the start page (leaves the room)" title="Back to the start page (leaves the room)"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12H5M11 5l-7 7 7 7"/></svg></button>
+                <h2>Waiting room</h2>
+            </div>
             <p id="hold-text" class="note"></p>
             <p id="hold-roster" class="note small"></p>
             <div class="wait-actions">
                 <button id="hold-join" type="button" class="primary">Join the game in progress</button>
                 <button id="hold-again" type="button" class="primary">Open the waiting room for a new game</button>
-                <button id="hold-leave" type="button" class="link">Leave the room</button>
             </div>
             <p id="hold-error" class="error" role="alert" hidden></p>
         </section>
