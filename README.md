@@ -17,6 +17,7 @@ A spy game played on a 5x5 grid of Marvel character cards, with 2 to 10 players.
 | `assets/brand/` | The original logo and wordmark of CryptoNames. The web-sized versions and the favicons are in `web/brand/`. |
 | `assets/images/` | The four coloured cards of each character: `<universe>/<character>/{blue,red,beige,black}.png`. |
 | `third_party/` | Single-header libraries: cpp-httplib and nlohmann/json (both MIT). |
+| `Dockerfile`, `fly.toml` | To host the server online (see *Hosting it online*). |
 | `web/` | The front-end (plain HTML, CSS and JavaScript), served at `/` by the server. `web/fonts/` has the game's font, Chakra Petch (SIL Open Font License, `OFL.txt` next to it), subset to Latin letters and kept in the repo so the game needs no internet. |
 
 ## Build and run
@@ -26,21 +27,25 @@ Needs a C++17 compiler and SQLite (both ship with macOS). Run everything from th
 ```
 make            # builds build/game and build/server
 make test       # builds and runs the tests
-build/game      # play in the terminal
+build/game      # play in the terminal (2 to 10 players, one after the other)
 build/server    # start the server on http://127.0.0.1:8080
 ```
+
+`build/server [port] [host]` takes another port (`build/server 9000`) or another host. To let other devices on your network join, run `build/server 8080 0.0.0.0`. When no port is given, the server uses the `PORT` environment variable if there is one (and then listens on `0.0.0.0`), which is how hosting services run it.
+
+Rooms live in the server's memory, so restarting the server closes them all.
 
 ## Play in the browser
 
 1. Run `build/server` and open http://127.0.0.1:8080 (every player opens it in their own browser).
 2. Each player types a name on the start page and then either **creates a room** or **joins one with its code**. A new room gets a random code (5 letters and digits, like `K7QD2`); the first player shares it, with the *Copy invite link* button in the waiting room or by just telling it. An invite link (`/?room=K7QD2`) opens the start page with the code already typed. The server can hold many rooms at once, each with its own players, settings and game. A room disappears as soon as its last player leaves it (or when nobody has used it for 2 hours), and rooms are not listed anywhere: you need the code to find one.
 3. In the waiting room everybody picks a team and a role (Blue or Red, Spy or Guesser) and can change it at any time. A room takes from 2 to 10 players, and any number of them can share a team and a role. With 4 or more players each team needs at least one spy and one guesser (the waiting room says what is missing). Whenever a player joins or leaves, everybody's ready is cancelled, so nobody starts a game with players they did not agree to.
-4. The waiting room also has a **Universes** picker: it decides which universes the 25 cards of the game are drawn from (each shows how many characters it has). Anybody in the waiting room can switch a universe on or off, and doing so cancels everybody's ready. At least 25 characters must stay selected, so a universe that would leave too few is locked. When the room empties, every universe is selected again.
+4. The waiting room also has a **Universes** picker: it decides which universes the 25 cards of the game are drawn from (each shows how many characters it has). Anybody in the waiting room can switch a universe on or off, and doing so cancels everybody's ready. At least 25 characters must stay selected, so a universe that would leave too few is locked. A new room starts with every universe selected.
 5. The waiting room also has two optional **time limits**, each with its own switch and seconds (from 15 to 600; type it or use the quick choices): one for the **spy to give the clue**, counted from the start of the turn, and one for the **guesser**, counted from the moment the clue is sent. During the match everybody sees a countdown that says which one it is ("Clue ⏱ 0:42" or "Guessing ⏱ 0:42") and turns red for the last 10 seconds. When time runs out, the turn passes to the other team by itself and nothing is carried over. Guessing right does not add time. The server keeps the clock, so nobody's browser can change it. Anybody can change the limits, and doing so cancels everybody's ready.
 6. When you are happy with your seat, press **I'm ready**. Pressing it again cancels it, and your seat is locked while you are ready. The game starts by itself when there are at least 2 players, nothing is missing and everybody is ready.
 7. Each turn starts with a **clue**. A spy of the team on turn types 1 or 2 words and picks a number (from 1 to the cards the team still has to find). Everybody sees the clue. Only then can the team's guessers click cards (any of them), and the number is how many **tries** the team has: every card revealed costs one try, and the turn ends by itself when they run out. Spies see the colour of every card, guessers see beige until a card is revealed.
 8. If the guesser reveals a **wrong card** (beige or the other team's), the turn ends at once, and the tries that were not used well are added to the team's next clue: the clue number minus the good tries. Example: clue FIRE 3, one good card and then a beige one: the next clue, SUNSHINE 2, gives the guesser 2 + 2 = 4 tries. Ending the turn on purpose, or running out of time, carries nothing over.
-9. Any player of either team (spy or guesser) can press **Forfeit** at any time, even when it is not their turn. A second click confirms it, and then the other team wins.
+9. Any player of either team (spy or guesser) can press **Forfeit** at any time, even when it is not their turn. A second click confirms it, and then the other team wins (in a co-operative game there is no other team, so the game is simply lost).
 10. **Leave the room** takes you back to the start page. During a match you are asked first: your team goes on without you, unless you were its last spy or its last guesser, and then it forfeits. After the match leaving is free. When the last player has left, the room is deleted. To play again with the same people, use *Play again* (see below) instead of leaving.
 11. The black card loses the game for the team that reveals it. The first team to reveal all its cards wins. Every card that is picked turns over on every player's screen.
 
@@ -71,8 +76,6 @@ With fewer than 4 players there is no opposing team. When the game starts, an al
 - A Red or beige card is a wrong card. The team wins by finding **all the Blue cards**, and loses when it reveals the black card or forfeits. Revealing every Red card does not win anything.
 - The time limits work the same way; when time runs out the turn starts over for Blue.
 
-Rooms live in the server's memory, so restarting the server closes them all. To let other devices on your network join, run `build/server 8080 0.0.0.0`.
-
 ## Hosting it online
 
 GitHub Pages cannot host this game (it only serves static files and the game needs the server). Use a host that runs containers; the `Dockerfile` works on any of them (Fly.io, Railway, Render, or a VPS with Docker). The server reads the `PORT` variable the host gives it (and then listens on `0.0.0.0`).
@@ -96,6 +99,14 @@ fly open                            # opens the game's address (https://<app>.fl
 To update after a change: `fly deploy --ha=false` again (this closes the open rooms). `fly logs` shows what the server prints, and `fly scale count 1` makes sure there is only one machine.
 
 For players far from Virginia, put Cloudflare (free plan) in front of the app's domain: it caches the page and the card pictures near each player.
+
+## Good to know
+
+- **English only.** The interface and the character names are in English.
+- **Names and clues are limited in bytes, not letters.** A player name can be 30 bytes and a clue 40, so a name in a script with multi-byte letters (Japanese, Arabic, Russian...) fits fewer letters. The font only has Latin letters; other scripts show in the system font.
+- **A clue has at most 2 words, counted by spaces**, which does not suit languages written without spaces.
+- **No accounts or passwords.** Anybody who has a room code can enter the room. A server holds at most 200 rooms, and a room is forgotten after 2 hours without use.
+- **The server clock is the only clock.** The timers count on the server, so it does not matter where the players are or what time their devices show; the countdown on screen can be off by about a second.
 
 ## Database
 
