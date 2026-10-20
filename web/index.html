@@ -86,10 +86,6 @@
                         <span id="mover-list" class="mover-list"></span>
                     </div>
                     <div id="teams" class="teams"></div>
-                    <div class="wait-actions">
-                        <button id="ready-btn" type="button" class="primary" aria-pressed="false">I'm ready</button>
-                        <span id="ready-count" class="note"></span>
-                    </div>
                 </div>
 
                 <div class="wait-side">
@@ -107,6 +103,10 @@
                         <legend>Time limits</legend>
                         <div id="timer-rows" class="timer-rows"></div>
                     </fieldset>
+                    <div class="wait-actions">
+                        <button id="ready-btn" type="button" class="primary" aria-pressed="false">I'm ready</button>
+                        <span id="ready-count" class="note"></span>
+                    </div>
                 </div>
             </div>
         </section>
@@ -163,12 +163,15 @@
                 <div id="score-RED" class="score team-RED"></div>
             </div>
 
-            <div id="board" class="board"></div>
+            <div class="game-layout">
+                <div id="board" class="board"></div>
 
-            <details id="clue-log" class="clue-log" open>
-                <summary>Clues so far</summary>
-                <ol id="clue-list" class="clue-list"></ol>
-            </details>
+                <!-- The clues given so far: on the side of the board on a wide screen, below it on a small one -->
+                <details id="clue-log" class="clue-log" open>
+                    <summary>Clues</summary>
+                    <ol id="clue-list" class="clue-list"></ol>
+                </details>
+            </div>
 
             <div class="actions">
                 <button id="end-turn" type="button" class="primary" hidden>End turn</button>

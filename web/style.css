@@ -225,6 +225,7 @@ body.modal-open { overflow: hidden; }
 .wait-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px 32px; align-items: start; }
 .wait-main .teams { max-width: none; }
 .wait-side { display: grid; gap: 20px; }
+.wait-side .wait-actions { margin-top: 0; }
 @media (min-width: 900px) {
     .wait-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
@@ -308,10 +309,17 @@ fieldset:disabled * { cursor: not-allowed; }
 .clue-row input { flex: 1 1 12rem; width: auto; text-transform: uppercase; }
 .clue-row select { padding: 10px 12px; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
 
-.clue-log { max-width: 720px; margin: 20px auto 0; color: var(--muted); }
-.clue-log summary { cursor: pointer; font-weight: 600; }
-.clue-list { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
-.clue-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 10px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+/* The board with the clues beside it (below it on a small screen) */
+.game-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (min-width: 1000px) {
+    .game-layout { grid-template-columns: minmax(0, 1fr) 250px; }
+    .clue-log { position: sticky; top: 12px; }
+    .clue-list { max-height: calc(100vh - 120px); overflow-y: auto; }
+}
+.clue-log { padding: 12px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.clue-log summary { cursor: pointer; font-weight: 700; color: var(--text); }
+.clue-list { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.clue-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 10px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
 .clue-list .word { font-weight: 800; text-transform: uppercase; }
 .clue-list .result { color: var(--muted); font-size: 0.9rem; }
 .clue-list:empty::after { content: "No clues yet."; color: var(--muted); }
