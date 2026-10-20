@@ -1,4 +1,4 @@
-<p align="center"><img src="web/brand/wordmark.png" alt="CryptoNames" width="420"></p>
+<p align="center"><img src="assets/brand/wordmark-transparent.png" alt="CryptoNames" width="420"></p>
 
 # CryptoNames
 
@@ -16,7 +16,7 @@ A spy game played on a 5x5 grid of Marvel character cards, with 2 to 10 players.
 | `src/server/` | The HTTP server (JSON API) a front-end talks to. The endpoints are listed at the top of `server.cpp`. |
 | `tests/` | Tests for the game rules. |
 | `data/` | `characters.db`, the characters table. |
-| `assets/brand/` | The original logo and wordmark of CryptoNames, and `logo-transparent-source.png`, the logo with a transparent background that the tab icons are made from. The web-sized versions and the favicons are in `web/brand/`. |
+| `assets/brand/` | The original logo and wordmark of CryptoNames, `logo-transparent-source.png`, the logo with a transparent background that the tab icons are made from, and `wordmark-transparent-source.png`, the wordmark with a transparent background (`wordmark-transparent.png` is its lighter version, trimmed and 1000 px wide, shown at the top of this README). The web-sized versions and the favicons are in `web/brand/`. |
 | `assets/images/` | The four coloured cards of each character: `<universe>/<character>/{blue,red,beige,black}.png`. |
 | `third_party/` | Single-header libraries: cpp-httplib and nlohmann/json (both MIT). |
 | `Dockerfile`, `fly.toml` | To host the server online (see *Hosting it online*). |
