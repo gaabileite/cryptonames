@@ -51,6 +51,14 @@ Rooms live in the server's memory, so restarting the server closes them all.
 10. **Leave the room** takes you back to the start page. During a match you are asked first: your team goes on without you, unless you were its last spy or its last guesser, and then it forfeits. After the match leaving is free. When the last player has left, the room is deleted. To play again with the same people, use *Play again* (see below) instead of leaving.
 11. The black card loses the game for the team that reveals it. The first team to reveal all its cards wins. Every card that is picked turns over on every player's screen.
 
+### When the match ends
+
+A match ends when a team finds all of its cards, when somebody reveals the black card, or when a player forfeits (or leaves, if that leaves their team without a spy or a guesser). **Nobody is redirected**: everybody stays on the game page and sees what happened.
+
+- The banner in the top bar says it: who won, or, for a forfeit, **who gave up** and who won ("B (Team Blue) forfeited. Team Red wins!"; in a co-operative game "B forfeited. You lose.").
+- The page becomes **read-only**: no card can be clicked, and the pins, the clue box, the notepad, the timer and the *Forfeit* and *End turn* buttons are gone. Only *Play again* and *Leave the room* are left.
+- **Every card is revealed, for everybody** (guessers too, who only see a card's colour once it is picked while the match is going on). The cards that were actually picked have a gold ring and a ✓, and the rest are dimmed.
+
 ### The spy's notepad
 
 Spies have a **Notepad** on the other side of the board from the *Clues* panel (on a wide screen: notepad, board, clues; on a smaller one it goes below the clues). It is for **future clues**, in the same format as a clue: 1 or 2 words and a number (from 1 to the cards the team still has to find).

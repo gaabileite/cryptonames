@@ -311,11 +311,13 @@ void testPins() {
     vector<int> mine = cardsWithKey(match, spy, keyOf(team));
     match.setPin("bs", mine[0], true); match.setPin("rg", mine[0], true);
     CHECK(match.viewFor("bs")[mine[0]].pins.size() == 2);
+    const int keep = mine[0] == 5 ? 6 : 5;                                          // a card that will not be picked, and keeps its pin
+    match.setPin("bg", keep, true);
     match.giveClue(spy, "PINS", 2);
     CHECK(match.guess(guesser, mine[0]) == keyOf(team));
     CHECK(match.viewFor("bs")[mine[0]].pins.empty() && match.viewFor("rg")[mine[0]].pins.empty());
     CHECK(rejects([&] { match.setPin("bs", mine[0], true); }));                   // already revealed
-    CHECK(match.viewFor("bg")[5].pins == vector<Team>{Team::BLUE});               // the other pins stay
+    CHECK(match.viewFor("bg")[keep].pins == vector<Team>{Team::BLUE});            // the other pins stay
     // the match is over: nothing to pin any more
     match.forfeit("rg");
     CHECK(rejects([&] { match.setPin("bs", 8, true); }));
@@ -333,6 +335,56 @@ void testPins() {
     room.chooseSeat(late, Team::RED, Role::GUESSER);
     room.match().setPin("late", 1, true);
     CHECK(room.match().viewFor("bs")[1].pins == vector<Team>{Team::RED});
+}
+
+void testRevealAtTheEnd() {
+    // while the match is going on a guesser only sees the cards that were picked; when it ends everybody sees everything
+    auto colours = [](const Match& match, const string& name) { vector<CardKey> keys; for (const CardView& card : match.viewFor(name)) keys.push_back(card.key); return keys; };
+    auto images = [](const Match& match, const string& name) { vector<string> files; for (const CardView& card : match.viewFor(name)) files.push_back(card.image); return files; };
+    for (int how = 0; how < 3; how++) {                                           // 0: a forfeit, 1: the black card, 2: a team finds all its cards
+        Match match(fullLobby(), characters());
+        Team team = match.currentTeam();
+        string spy = spyOf(team), guesser = guesserOf(team);
+        vector<CardKey> truth = colours(match, spy);                              // what the spy always sees
+        vector<int> mine = cardsWithKey(match, spy, keyOf(team));
+        vector<int> black = cardsWithKey(match, spy, CardKey::BLACK);
+        match.giveClue(spy, "END", 2);
+        match.guess(guesser, mine[0]);                                            // one card is picked
+        for (string name : {"bg", "rg"}) {
+            vector<CardKey> seen = colours(match, name);
+            int beige = 0; for (CardKey key : seen) beige += key == CardKey::BEIGE;
+            CHECK(beige == 24 && seen[mine[0]] == keyOf(team));                   // still hidden: only the picked card shows its colour
+        }
+        CHECK(!match.isFinished());
+        if (how == 0) match.forfeit("rg");
+        else if (how == 1) match.guess(guesser, black[0]);
+        else {                                                                    // find all of the team's cards, with a clue each time
+            for (size_t i = 1; i < mine.size() && !match.isFinished(); i++) {
+                if (!match.hasClue()) { if (match.currentTeam() != team) break; match.giveClue(spy, "MORE", 1); }
+                match.guess(guesser, mine[i]);
+            }
+        }
+        if (!match.isFinished()) { match.forfeit("bs"); }                          // (a turn passed on the way: finish it anyway)
+        CHECK(match.isFinished());
+        for (string name : {"bs", "bg", "rs", "rg"}) CHECK(colours(match, name) == truth);   // everybody sees every colour now
+        vector<string> files = images(match, "bg");
+        for (int i = 0; i < 25; i++) {                                            // and the pictures match the colours
+            string file = toString(truth[i]); transform(file.begin(), file.end(), file.begin(), ::tolower);
+            CHECK(files[i].size() > file.size() + 4 && files[i].substr(files[i].size() - file.size() - 4) == file + ".png");
+        }
+        int picked = 0; for (const CardView& card : match.viewFor("rg")) picked += card.state == CardState::REVEALED;
+        CHECK(picked >= 1 && picked < 25);                                        // the state still says which ones were picked
+        CHECK(match.viewFor("bg")[mine[0]].state == CardState::REVEALED);
+    }
+    // the forfeit says who gave up
+    Match match(fullLobby(), characters());
+    try { match.forfeitedByPlayer(); CHECK(false); } catch (const logic_error&) {}
+    match.forfeit("rg");
+    CHECK(match.wasForfeited() && match.forfeitedByPlayer() == "rg" && match.forfeitedBy() == Team::RED);
+    // a player who leaves and takes the team's last spy or guesser away is the one who forfeited
+    Match left(fullLobby(), characters());
+    left.playerLeft("bs");
+    CHECK(left.isFinished() && left.forfeitedByPlayer() == "bs" && left.forfeitedBy() == Team::BLUE);
 }
 
 void testBiggerTeams() {
@@ -1542,6 +1594,7 @@ int main() {
     run("room match", testRoomMatch);
     run("host", testHost);
     run("pins", testPins);
+    run("reveal at the end", testRevealAtTheEnd);
     run("room registry", testRoomRegistry);
     run("grid", testGrid);
     run("match setup and views", testMatchSetupAndViews);

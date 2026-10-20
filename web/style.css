@@ -479,6 +479,19 @@ button:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
 .note-list .note-del:hover { color: var(--error); }
 .note-list:empty::after { content: "No notes yet."; padding: 4px 2px; color: var(--muted); }
 
+/* The notepad and the clues are narrow columns beside the board on a wide screen: smaller text, so they are not cramped.
+   (Below 1000 px they are full width and keep the normal size.) */
+@media (min-width: 1000px) {
+    .clue-log, .notepad { font-size: 0.82rem; }
+    .clue-log summary, .notepad h3 { font-size: 0.85rem; }
+    .clue-list { gap: 5px; }
+    .clue-list li { gap: 3px 8px; }
+    .clue-list .result { font-size: 0.72rem; }
+    .clue-list .chip { padding: 1px 8px; font-size: 0.68rem; }
+    .note-form button { font-size: 0.75rem; }
+    .note-list .note-use { gap: 8px; padding: 7px 9px; }
+}
+
 /* The pin: top right of the card, next to the card (not inside it) so that it never picks the card */
 .card-slot { position: relative; }
 .pin {
@@ -519,6 +532,11 @@ button:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
 
 /* A spy sees every colour, so the cards that were already guessed are dimmed. */
 .card.spy-view.revealed img { opacity: 0.4; }
+/* When the match is over every card is shown with its real colour: the cards that were picked are highlighted (a gold ring, and
+   they are not dimmed even for the spies), the others are dimmed */
+.card.ended:not(.revealed) { filter: brightness(0.62) saturate(0.75); }
+.card.ended.revealed { box-shadow: 0 0 0 3px #ffd84d, 0 6px 14px rgba(0, 0, 0, 0.4); }
+.card.ended.revealed img { opacity: 1; }
 
 .tag {
     position: absolute;

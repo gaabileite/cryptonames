@@ -64,6 +64,7 @@ class Match {
         Clock::time_point phaseStartedAt; // when the turn began, or when the clue was given
         bool forfeited;
         Team forfeitingTeam;
+        string forfeitingPlayer;          // who gave up (or left, and left their team without a spy or a guesser)
         bool coop;                        // co-operative game: everybody is on the BLUE team
         set<string> departed;             // players who left the room during the match
         vector<Clue> clues;               // every clue of the match, oldest first
@@ -211,6 +212,14 @@ class Match {
             return forfeited;
         }
 
+        // The player who gave up. Only when wasForfeited().
+        const string& forfeitedByPlayer() const {
+            if (!forfeited) {
+                throw logic_error("Nobody forfeited");
+            }
+            return forfeitingPlayer;
+        }
+
         // The team that gave up. Only when wasForfeited().
         Team forfeitedBy() const {
             if (!forfeited) {
@@ -296,12 +305,14 @@ class Match {
 
         // The 25 cards as that player may see them: a SPY sees every key,
         // a GUESSER only sees the key of the cards that were already revealed (the rest look BEIGE).
+        // Once the match is over (a win, the black card, a forfeit) every player sees every key; `state` still says which
+        // cards were actually picked.
         vector<CardView> viewFor(const string& name) const {
             const Player& player = findPlayer(name);
             vector<CardView> view;
             for (int i = 0; i < 25; i++) {
                 const Card& card = grid.lineup[i];
-                bool visible = player.isSpy() || card.state == CardState::REVEALED;
+                bool visible = player.isSpy() || card.state == CardState::REVEALED || isFinished();   // when the match is over everybody sees every card
                 CardKey shown = visible ? card.key : CardKey::BEIGE;
                 vector<Team> pins;
                 for (Team team : {Team::BLUE, Team::RED}) {
@@ -417,6 +428,7 @@ class Match {
             const Player& player = findPlayer(name);
             forfeited = true;
             forfeitingTeam = player.team;
+            forfeitingPlayer = player.name;
             finish(opposite(player.team));
         }
 

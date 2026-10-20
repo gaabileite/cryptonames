@@ -691,7 +691,8 @@
     let latest = null;                // { state, cards } of the last render: what every card should look like now
     const flipping = new Set();       // indexes of the cards that are being turned over
 
-    function describeCard(card, isSpy) {
+    function describeCard(card, isSpy, ended) {
+        if (ended) return `${card.name}, ${card.state === 'REVEALED' ? 'picked' : 'not picked'}: ${NAMES[card.key]}`;
         if (card.state === 'REVEALED') return `${card.name}, revealed: ${NAMES[card.key]}`;
         return isSpy ? `${card.name}, secret: ${NAMES[card.key]}` : card.name;
     }
@@ -709,21 +710,24 @@
         image.alt = card.name;
         button.querySelector('.name').textContent = card.name;
 
-        button.className = `card key-${card.key}${card.state === 'REVEALED' ? ' revealed' : ''}${isSpy ? ' spy-view' : ''}`;
+        // When the match is over everybody sees every card (the server sends the real colours): the ones that were picked are
+        // highlighted, the others dimmed, and nothing can be clicked.
+        const ended = !!state.finished;
+        button.className = `card key-${card.key}${card.state === 'REVEALED' ? ' revealed' : ''}${isSpy ? ' spy-view' : ''}${ended ? ' ended' : ''}`;
         button.disabled = !(state.canGuess && card.state === 'SECRET');
-        button.setAttribute('aria-label', describeCard(card, isSpy));
+        button.setAttribute('aria-label', describeCard(card, isSpy, ended));
 
         // The pins: a picked card has none. Mine is the button of my team; the other team's is drawn next to it.
         const revealed = card.state === 'REVEALED';
         const myTeam = state.you.team;
-        const pins = revealed ? [] : (card.pins || []);
+        const pins = revealed || ended ? [] : (card.pins || []);        // a match that is over has no reminders to make
         const pinnedByMyTeam = pins.includes(myTeam);
         const others = pins.filter((team) => team !== myTeam);
         const slot = cardSlots[index], pin = pinButtons[index], other = pinOthers[index];
         slot.classList.toggle('pinned-BLUE', pins.includes('BLUE'));
         slot.classList.toggle('pinned-RED', pins.includes('RED'));
         slot.classList.toggle('pinned-mine', pinnedByMyTeam);
-        pin.hidden = revealed;
+        pin.hidden = revealed || ended;
         pin.dataset.team = myTeam;
         pin.setAttribute('aria-pressed', pinnedByMyTeam ? 'true' : 'false');
         pin.setAttribute('aria-label', `${pinnedByMyTeam ? 'Take the pin off' : 'Pin'} ${card.name} for your team`);
@@ -738,7 +742,7 @@
         // The colour as text too, so it does not depend on seeing the colours.
         const tag = button.querySelector('.tag');
         if (card.state === 'REVEALED') tag.textContent = `${NAMES[card.key]} ✓`;
-        else tag.textContent = isSpy ? NAMES[card.key] : '';
+        else tag.textContent = isSpy || ended ? NAMES[card.key] : '';
     }
 
     function canAnimate() {
@@ -961,11 +965,11 @@
             // there is no other team: the Blue team either finds every card (and wins) or loses
             const won = state.winner === 'BLUE';
             banner.className = `banner team-${won ? 'BLUE' : 'RED'}`;
-            banner.textContent = won ? 'You found every Blue card. You win!' : (state.forfeitedBy ? 'Your team forfeited. You lose.' : 'That was the black card. You lose.');
+            banner.textContent = won ? 'You found every Blue card. You win!' : (state.forfeitedBy ? `${state.forfeitedByPlayer} forfeited. You lose.` : 'That was the black card. You lose.');
         } else if (state.finished) {
             banner.className = `banner team-${state.winner}`;
             banner.textContent = state.forfeitedBy
-                ? `Team ${NAMES[state.forfeitedBy]} forfeited. Team ${NAMES[state.winner]} wins!`
+                ? `${state.forfeitedByPlayer} (Team ${NAMES[state.forfeitedBy]}) forfeited. Team ${NAMES[state.winner]} wins!`
                 : `Team ${NAMES[state.winner]} wins!`;
         } else if (state.cooperative) {
             banner.className = 'banner team-BLUE';
@@ -981,9 +985,9 @@
         // Hint
         let hint;
         if (state.finished && state.forfeitedBy) {
-            hint = state.forfeitedBy === you.team ? 'Your team forfeited.' : 'The other team forfeited.';
+            hint = `${state.forfeitedBy === you.team ? 'Your team forfeited.' : 'The other team forfeited.'} All the cards are revealed: the highlighted ones were picked.`;
         } else if (state.finished) {
-            hint = state.winner === you.team ? 'Your team won.' : 'Your team lost.';
+            hint = `${state.winner === you.team ? 'Your team won.' : 'Your team lost.'} All the cards are revealed: the highlighted ones were picked.`;
         } else if (state.canGiveClue) {
             hint = 'Your turn: give your guesser a clue. You see every colour.';
         } else if (isSpy && state.currentTeam === you.team) {

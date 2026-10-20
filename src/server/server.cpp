@@ -49,7 +49,8 @@
 //   GET  /api/state      the room code, which match of the room this is ("game"), the turn, the cards left, the time left, the clue and tries left, the winner,
 //                        who you are, whether the game is co-operative, and whether leaving would make your team
 //                        forfeit                                                            (X-Token)
-//   GET  /api/board      the 25 cards as YOU may see them, each with "pins": the teams that pinned it (BLUE, RED)  (X-Token)
+//   GET  /api/board      the 25 cards as YOU may see them, each with "pins": the teams that pinned it (BLUE, RED). Once the
+//                        match is over every player gets every card's real colour ("state" still tells the picked ones)  (X-Token)
 //   POST /api/pin        {"index": 0-24, "pinned": true|false} pins a card for your team, or takes your team's pin off. Any
 //                        player of the team, spy or guesser. Every player sees every pin; a picked card loses them  (X-Token)
 //   POST /api/clue       {"text": "1-2 words", "number": n} the SPY's clue of the turn     (X-Token)
@@ -400,6 +401,7 @@ int main(int argc, char* argv[]) {
             if (match.isFinished()) {
                 answer["winner"] = toString(match.winner());
                 answer["forfeitedBy"] = match.wasForfeited() ? json(toString(match.forfeitedBy())) : json(nullptr);
+                answer["forfeitedByPlayer"] = match.wasForfeited() ? json(match.forfeitedByPlayer()) : json(nullptr);
             }
         }
         return answer;
