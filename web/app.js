@@ -918,8 +918,10 @@
         busy = true;
         $('clue-btn').disabled = true;
         try {
-            await api('POST', '/api/clue', { text: words.join(' '), number: Number($('clue-number').value) });
+            const number = Number($('clue-number').value);
+            await api('POST', '/api/clue', { text: words.join(' '), number });
             $('clue-text').value = '';
+            spendNote(words.join(' '), number);                     // a clue that came from the notepad is used up: its note goes
         } catch (error) {
             showClueError(error.message);
         } finally {
@@ -1183,15 +1185,32 @@
         save() { try { sessionStorage.setItem(this.key(), JSON.stringify(notes)); } catch (e) { /* the notes just will not survive a refresh */ } },
     };
 
+    let stagedNote = null;                // the note last put in the clue box (one of `notes`)
+
+    // The clue was sent: the note it came from is used up, so it is deleted. That is the note that was put in the clue box, if
+    // the words that were sent are still its words; otherwise a note with exactly the words and the number that were sent.
+    function spendNote(text, number) {
+        const same = (a, b) => a.trim().split(/\s+/).join(' ').toLowerCase() === b.trim().split(/\s+/).join(' ').toLowerCase();
+        let index = stagedNote ? notes.indexOf(stagedNote) : -1;
+        if (index === -1 || !same(notes[index].text, text)) index = notes.findIndex((note) => same(note.text, text) && note.number === number);
+        stagedNote = null;
+        if (index === -1) return;
+        notes.splice(index, 1);
+        noteStore.save();
+        lastNotesKey = null;
+        if (latest) renderNotes(latest.state);
+    }
+
     // Puts a note in the clue box: the words, and the number (as far as the cards left allow)
     function stageClue(note) {
+        stagedNote = note;
         $('clue-text').value = note.text;
         const select = $('clue-number');
         if (select.options.length > 0) select.value = String(Math.min(note.number, select.options.length));
         else staged.number = note.number;               // the list of numbers is built when it is the spy's turn
         if (!$('clue-form').hidden) {
             $('clue-text').focus();
-            toast(`In your clue box: ${note.text} ${Math.min(note.number, select.options.length || note.number)}. Press "Send clue" when you are ready.`);
+            toast(`In your clue box: ${note.text} ${Math.min(note.number, select.options.length || note.number)}. Press "Send clue" when you are ready: the note is deleted then.`);
         } else {
             toast(`Ready in your clue box: ${note.text} ${note.number}. It will be there on your turn.`);
         }
@@ -1223,7 +1242,7 @@
             use.type = 'button';
             use.className = 'note-use';
             use.dataset.index = index;
-            use.title = 'Put this clue in your clue box';
+            use.title = 'Put this clue in your clue box (the note is deleted when you send the clue)';
             use.append(span('word', note.text), `${note.number}`);   // the same look as a clue in the list of clues
             const del = document.createElement('button');
             del.type = 'button';

@@ -56,7 +56,7 @@ Rooms live in the server's memory, so restarting the server closes them all.
 Spies have a **Notepad** on the other side of the board from the *Clues* panel (on a wide screen: notepad, board, clues; on a smaller one it goes below the clues). It is for **future clues**, in the same format as a clue: 1 or 2 words and a number (from 1 to the cards the team still has to find).
 
 - Type the words, pick the number and press *Add*. Newest notes are on top; the **×** deletes one.
-- **Click a note** to put it in the clue box (the staging area where you write your clue): the words and the number are filled in, and it is **not** sent until you press *Send clue*. You can do it before your turn: the clue will be waiting in the box when it comes. The note stays in the notepad.
+- **Click a note** to put it in the clue box (the staging area where you write your clue): the words and the number are filled in, and it is **not** sent until you press *Send clue*. You can do it before your turn: the clue will be waiting in the box when it comes. **When you send that clue, its note is deleted** (it is used up). If you change the words before sending, the note stays; and a clue you type by hand with exactly the words and the number of a note uses that note up as well. Only staging a note, without sending, changes nothing.
 - **Notes are private.** They are kept only in your own browser tab (never sent to the server), so nobody else, not even your teammates, can see them. A page refresh keeps them; a new game starts with an empty notepad. The notepad holds up to 30 notes.
 - Guessers do not have a notepad.
 
