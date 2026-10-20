@@ -61,7 +61,7 @@
 
     function show(name) {
         for (const key of Object.keys(screens)) screens[key].hidden = key !== name;
-        if (name !== 'game') document.body.classList.remove('spy-game');         // the wide page is for a spy with a notepad
+        document.body.classList.toggle('in-game', name === 'game');           // the game page uses the whole width of the window
     }
 
     function chip(team) {
@@ -1200,7 +1200,6 @@
         const show = state.you.role === 'SPY' && !state.finished;
         $('notepad').hidden = !show;
         $('game-layout').classList.toggle('has-notes', show);
-        document.body.classList.toggle('spy-game', show);
         if (!show) return;
         const cardsLeft = state.remaining[state.you.team];
         const key = JSON.stringify([notes, cardsLeft]);

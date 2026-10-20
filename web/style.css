@@ -315,17 +315,21 @@ fieldset:disabled * { cursor: not-allowed; }
 .game-layout > .clue-log { grid-area: clues; }
 .game-layout > .notepad { grid-area: notes; }
 @media (min-width: 1000px) {
-    .game-layout { grid-template-columns: minmax(0, 1fr) 250px; grid-template-areas: "board clues" "board notes"; }
+    .game-layout { grid-template-columns: minmax(0, 1fr) 200px; grid-template-areas: "board clues" "board notes"; }
     .clue-log { position: sticky; top: 12px; }
     .clue-list { max-height: calc(100vh - 120px); overflow-y: auto; }
 }
 /* A spy has the notepad on the other side of the board: notepad, board, clues */
-body.spy-game main { max-width: 1400px; }
 @media (min-width: 1240px) {
-    .game-layout.has-notes { grid-template-columns: 240px minmax(0, 1fr) 250px; grid-template-areas: "notes board clues"; }
+    .game-layout.has-notes { grid-template-columns: 200px minmax(0, 1fr) 200px; grid-template-areas: "notes board clues"; }
     .notepad { position: sticky; top: 12px; }
 }
-.clue-log { padding: 12px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+
+/* The game page uses nearly the whole window, with thin margins, so the cards stay as big as possible */
+body.in-game main { max-width: 1760px; padding: 12px 10px 32px; }
+body.in-game .game-layout { gap: 12px; }
+body.in-game .board { gap: 8px; }
+.clue-log { padding: 10px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
 .clue-log summary { cursor: pointer; font-weight: 700; color: var(--text); }
 .clue-list { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
 .clue-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 10px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
@@ -454,7 +458,7 @@ button:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
 .card img { display: block; width: 100%; height: 100%; object-fit: cover; }
 
 /* The spy's notepad */
-.notepad { padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.notepad { padding: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
 .notepad h3 { margin: 0 0 10px; font-size: 0.95rem; color: var(--text); }
 .note-form { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; }
 .note-form input, .note-form select { min-width: 0; padding: 8px 10px; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
@@ -604,7 +608,7 @@ button.danger:disabled { opacity: 0.4; cursor: not-allowed; }
 .dialog button { margin-top: 8px; }
 .dialog-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
 
-@media (max-width: 900px) {
+@media (max-width: 700px) {
     .board { grid-template-columns: repeat(3, 1fr); }
 }
 
