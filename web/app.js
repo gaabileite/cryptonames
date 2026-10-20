@@ -1092,6 +1092,31 @@
         else if (event.key === 'Escape' && asking) stopAsking();
     });
 
+    // ---------- The how-to-play guide (the (i) button in the top bar) ----------
+
+    let guideOpener = null;           // what had the focus before, to give it back on closing
+    function openGuide() {
+        guideOpener = document.activeElement;
+        $('guide').hidden = false;
+        document.body.classList.add('modal-open');
+        $('guide-close').focus();
+    }
+
+    function closeGuide() {
+        $('guide').hidden = true;
+        document.body.classList.remove('modal-open');
+        if (guideOpener) guideOpener.focus();
+    }
+
+    $('info-btn').addEventListener('click', openGuide);
+    $('guide-close').addEventListener('click', closeGuide);
+    $('guide').addEventListener('click', (event) => { if (event.target === $('guide')) closeGuide(); });      // a click outside the dialog
+    document.addEventListener('keydown', (event) => {
+        if ($('guide').hidden) return;
+        if (event.key === 'Escape') closeGuide();
+        else if (event.key === 'Tab') { event.preventDefault(); $('guide-close').focus(); }       // the only thing to tab to: keeps the focus inside
+    });
+
     // ---------- Refresh loop ----------
 
     async function refreshPlay() {
