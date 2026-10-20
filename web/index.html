@@ -163,7 +163,7 @@
                 <div id="score-RED" class="score team-RED"></div>
             </div>
 
-            <div class="game-layout">
+            <div id="game-layout" class="game-layout">
                 <div id="board" class="board"></div>
 
                 <!-- The clues given so far: on the side of the board on a wide screen, below it on a small one -->
@@ -171,6 +171,20 @@
                     <summary>Clues</summary>
                     <ol id="clue-list" class="clue-list"></ol>
                 </details>
+
+                <!-- The spy's notepad: future clues, in the same format as a clue. Private: only the spy who wrote them sees them -->
+                <aside id="notepad" class="notepad" aria-labelledby="notepad-title" hidden>
+                    <h3 id="notepad-title">Notepad</h3>
+                    <form id="note-form" class="note-form" novalidate>
+                        <label for="note-text" class="sr-only">A clue for later (1 or 2 words)</label>
+                        <input id="note-text" type="text" maxlength="40" placeholder="Note" autocomplete="off" autocapitalize="characters" spellcheck="false">
+                        <label for="note-number" class="sr-only">Number of cards</label>
+                        <select id="note-number" aria-label="Number of cards that fit the note"></select>
+                        <button id="note-btn" type="submit">Add</button>
+                    </form>
+                    <p id="note-error" class="error small" role="alert" hidden></p>
+                    <ol id="note-list" class="clue-list note-list"></ol>
+                </aside>
             </div>
 
             <div class="actions">

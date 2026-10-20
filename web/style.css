@@ -310,11 +310,20 @@ fieldset:disabled * { cursor: not-allowed; }
 .clue-row select { padding: 10px 12px; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
 
 /* The board with the clues beside it (below it on a small screen) */
-.game-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
+.game-layout { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: "board" "clues" "notes"; gap: 20px; align-items: start; }
+.game-layout > .board { grid-area: board; }
+.game-layout > .clue-log { grid-area: clues; }
+.game-layout > .notepad { grid-area: notes; }
 @media (min-width: 1000px) {
-    .game-layout { grid-template-columns: minmax(0, 1fr) 250px; }
+    .game-layout { grid-template-columns: minmax(0, 1fr) 250px; grid-template-areas: "board clues" "board notes"; }
     .clue-log { position: sticky; top: 12px; }
     .clue-list { max-height: calc(100vh - 120px); overflow-y: auto; }
+}
+/* A spy has the notepad on the other side of the board: notepad, board, clues */
+body.spy-game main { max-width: 1400px; }
+@media (min-width: 1240px) {
+    .game-layout.has-notes { grid-template-columns: 240px minmax(0, 1fr) 250px; grid-template-areas: "notes board clues"; }
+    .notepad { position: sticky; top: 12px; }
 }
 .clue-log { padding: 12px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
 .clue-log summary { cursor: pointer; font-weight: 700; color: var(--text); }
@@ -443,6 +452,23 @@ button:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
     transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 .card img { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+/* The spy's notepad */
+.notepad { padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.notepad h3 { margin: 0 0 10px; font-size: 0.95rem; color: var(--text); }
+.note-form { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; }
+.note-form input, .note-form select { min-width: 0; padding: 8px 10px; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
+.note-form input { text-transform: uppercase; }
+.note-form button { padding: 8px 12px; color: var(--on-accent); font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; background: var(--accent); border: 0; border-radius: 8px; }
+.notepad .error { margin-top: 8px; }
+.note-list { max-height: calc(100vh - 220px); overflow-y: auto; }
+.note-list li { padding: 0; gap: 0; }
+.note-list .note-use { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 10px; color: inherit; font: inherit; text-align: left; background: none; border: 0; border-radius: 8px; cursor: pointer; }
+.note-list .note-use:hover { background: var(--surface); }
+.note-list .note-use .word { overflow-wrap: anywhere; }
+.note-list .note-del { flex: none; width: 34px; height: 34px; color: var(--muted); font-size: 1.1rem; line-height: 1; background: none; border: 0; border-radius: 8px; cursor: pointer; }
+.note-list .note-del:hover { color: var(--error); }
+.note-list:empty::after { content: "No notes yet."; padding: 4px 2px; color: var(--muted); }
 
 /* The pin: top right of the card, next to the card (not inside it) so that it never picks the card */
 .card-slot { position: relative; }

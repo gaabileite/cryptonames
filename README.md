@@ -51,6 +51,15 @@ Rooms live in the server's memory, so restarting the server closes them all.
 10. **Leave the room** takes you back to the start page. During a match you are asked first: your team goes on without you, unless you were its last spy or its last guesser, and then it forfeits. After the match leaving is free. When the last player has left, the room is deleted. To play again with the same people, use *Play again* (see below) instead of leaving.
 11. The black card loses the game for the team that reveals it. The first team to reveal all its cards wins. Every card that is picked turns over on every player's screen.
 
+### The spy's notepad
+
+Spies have a **Notepad** on the other side of the board from the *Clues* panel (on a wide screen: notepad, board, clues; on a smaller one it goes below the clues). It is for **future clues**, in the same format as a clue: 1 or 2 words and a number (from 1 to the cards the team still has to find).
+
+- Type the words, pick the number and press *Add*. Newest notes are on top; the **×** deletes one.
+- **Click a note** to put it in the clue box (the staging area where you write your clue): the words and the number are filled in, and it is **not** sent until you press *Send clue*. You can do it before your turn: the clue will be waiting in the box when it comes. The note stays in the notepad.
+- **Notes are private.** They are kept only in your own browser tab (never sent to the server), so nobody else, not even your teammates, can see them. A page refresh keeps them; a new game starts with an empty notepad. The notepad holds up to 30 notes.
+- Guessers do not have a notepad.
+
 ### Pins
 
 Every card has a **pin** button at its top right: a reminder for your team, *"I want to pick this one later"*. Clicking the pin only highlights the card; clicking the card itself is what picks it.

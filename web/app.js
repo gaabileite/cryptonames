@@ -61,6 +61,7 @@
 
     function show(name) {
         for (const key of Object.keys(screens)) screens[key].hidden = key !== name;
+        if (name !== 'game') document.body.classList.remove('spy-game');         // the wide page is for a spy with a notepad
     }
 
     function chip(team) {
@@ -140,6 +141,8 @@
         moving = null;
         lastWait = null;
         currentGame = null;
+        notes = [];
+        lastNotesKey = null;
         resetRendering();
         document.title = BASE_TITLE;
     }
@@ -834,6 +837,8 @@
 
     // ---------- Clues ----------
 
+    const staged = { number: null };      // the number of a note sent to the clue box before its list of numbers existed
+
     function plural(count, word) {
         if (count === 1) return `1 ${word}`;
         return word.endsWith('y') ? `${count} ${word.slice(0, -1)}ies` : `${count} ${word}s`;      // try -> tries
@@ -872,7 +877,8 @@
             const select = $('clue-number');
             const cardsLeft = state.remaining[state.you.team];
             if (select.options.length !== cardsLeft) {          // keep what was chosen while the options are the same
-                const chosen = Number(select.value) || 1;
+                const chosen = staged.number || Number(select.value) || 1;       // a note the spy staged wins
+                staged.number = null;
                 select.replaceChildren();
                 for (let n = 1; n <= cardsLeft; n++) select.append(new Option(String(n), String(n)));
                 select.value = String(Math.min(chosen, cardsLeft));
@@ -928,12 +934,15 @@
         updateTimer(state.timer, state.finished);
         if (state.game !== currentGame) {         // a new match of the same room: nothing of the last one is kept
             currentGame = state.game;
+            notes = noteStore.load();                 // the spy's notes of this match (kept if the page was refreshed)
+            lastNotesKey = null;
             lastStates = null;
             delete lastRendered.game;
             asking = null;
         }
         leavingForfeits = state.leavingForfeits;
         cooperative = state.cooperative;
+        renderNotes(state);
         showCoopAlert(state);
         const { timer, ...stable } = state;       // the time left changes with every poll, which must not redraw the board
         if (!changed('game', { state: stable, board })) return;
@@ -1158,6 +1167,105 @@
         if (event.key === 'Escape' && !$('join-choice').hidden) answerChoice(null);
         else if (event.key === 'Escape' && !$('coop-alert').hidden) closeCoopAlert();
         else if (event.key === 'Escape' && asking) stopAsking();
+    });
+
+    // ---------- The spy's notepad ----------
+    // Future clues in the format of a clue (1 or 2 words and a number). Only spies have it, and the notes never leave this
+    // browser tab: nobody else can see them. Clicking a note puts it in the clue box (it does not send it).
+
+    const NOTE_LIMIT = 30;
+    let notes = [];                       // { text, number }, newest first
+    let lastNotesKey = null;              // what the list on screen shows, to draw it again only when that changes
+    const noteStore = {
+        key: () => `notes:${token}:${currentGame}`,
+        load() { try { const found = JSON.parse(sessionStorage.getItem(this.key()) || '[]'); return Array.isArray(found) ? found : []; } catch (e) { return []; } },
+        save() { try { sessionStorage.setItem(this.key(), JSON.stringify(notes)); } catch (e) { /* the notes just will not survive a refresh */ } },
+    };
+
+    // Puts a note in the clue box: the words, and the number (as far as the cards left allow)
+    function stageClue(note) {
+        $('clue-text').value = note.text;
+        const select = $('clue-number');
+        if (select.options.length > 0) select.value = String(Math.min(note.number, select.options.length));
+        else staged.number = note.number;               // the list of numbers is built when it is the spy's turn
+        if (!$('clue-form').hidden) {
+            $('clue-text').focus();
+            toast(`In your clue box: ${note.text} ${Math.min(note.number, select.options.length || note.number)}. Press "Send clue" when you are ready.`);
+        } else {
+            toast(`Ready in your clue box: ${note.text} ${note.number}. It will be there on your turn.`);
+        }
+    }
+
+    function renderNotes(state) {
+        const show = state.you.role === 'SPY' && !state.finished;
+        $('notepad').hidden = !show;
+        $('game-layout').classList.toggle('has-notes', show);
+        document.body.classList.toggle('spy-game', show);
+        if (!show) return;
+        const cardsLeft = state.remaining[state.you.team];
+        const key = JSON.stringify([notes, cardsLeft]);
+        if (key === lastNotesKey) return;
+        lastNotesKey = key;
+
+        const select = $('note-number');
+        if (select.options.length !== cardsLeft) {                  // as many numbers as the cards the team still has to find
+            const chosen = Number(select.value) || 1;
+            select.replaceChildren();
+            for (let n = 1; n <= cardsLeft; n++) select.append(new Option(String(n), String(n)));
+            select.value = String(Math.min(chosen, cardsLeft));
+        }
+
+        const list = $('note-list');
+        list.replaceChildren();
+        notes.forEach((note, index) => {
+            const item = document.createElement('li');
+            const use = document.createElement('button');
+            use.type = 'button';
+            use.className = 'note-use';
+            use.dataset.index = index;
+            use.title = 'Put this clue in your clue box';
+            use.append(span('word', note.text), `${note.number}`);   // the same look as a clue in the list of clues
+            const del = document.createElement('button');
+            del.type = 'button';
+            del.className = 'note-del';
+            del.dataset.index = index;
+            del.textContent = '×';
+            del.setAttribute('aria-label', `Delete the note ${note.text} ${note.number}`);
+            item.append(use, del);
+            list.append(item);
+        });
+    }
+
+    function showNoteError(message) {
+        $('note-error').textContent = message || '';
+        $('note-error').hidden = !message;
+    }
+
+    $('note-form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const words = $('note-text').value.trim().split(/\s+/).filter(Boolean);
+        if (words.length === 0) return showNoteError('Type a clue.');
+        if (words.length > 2) return showNoteError('A clue can have at most 2 words.');
+        if (notes.length >= NOTE_LIMIT) return showNoteError(`The notepad holds ${NOTE_LIMIT} notes: delete one first.`);
+        showNoteError('');
+        notes.unshift({ text: words.join(' '), number: Number($('note-number').value) || 1 });
+        noteStore.save();
+        $('note-text').value = '';
+        lastNotesKey = null;
+        if (latest) renderNotes(latest.state);
+        $('note-text').focus();
+    });
+
+    $('note-list').addEventListener('click', (event) => {
+        const del = event.target.closest('button.note-del'), use = event.target.closest('button.note-use');
+        if (del) {
+            notes.splice(Number(del.dataset.index), 1);
+            noteStore.save();
+            lastNotesKey = null;
+            if (latest) renderNotes(latest.state);
+        } else if (use && notes[Number(use.dataset.index)]) {
+            stageClue(notes[Number(use.dataset.index)]);
+        }
     });
 
     // ---------- The how-to-play guide (the (i) button in the top bar) ----------
