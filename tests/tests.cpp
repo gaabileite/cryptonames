@@ -1236,19 +1236,19 @@ void testRoomRegistry() {
         Clock::time_point start = Clock::now();
         RoomRegistry::Entry idle = rooms.create("idle", start);
         RoomRegistry::Entry busy = rooms.create("busy", start);
-        const string idleCode = idle.room->code();
+        const string idleCode = idle.room->code(), busyCode = busy.room->code();      // kept: the rooms themselves get deleted
         CHECK(&rooms.roomOf(busy.token, start + chrono::minutes(20)) == busy.room);      // used at minute 20
         rooms.sweep(start + chrono::minutes(29));
         CHECK(rooms.size() == 2);
         rooms.sweep(start + chrono::minutes(31));
-        CHECK(rooms.size() == 1 && !rooms.contains(idleCode) && rooms.contains(busy.room->code()));     // idle: 31 min; busy: 11 min
+        CHECK(rooms.size() == 1 && !rooms.contains(idleCode) && rooms.contains(busyCode));     // idle: 31 min; busy: 11 min
         CHECK(throwsType<NotInRoom>([&] { rooms.roomOf(idle.token, start + chrono::minutes(31)); }));
         CHECK(throwsType<NoSuchRoom>([&] { rooms.join(idleCode, "late", start + chrono::minutes(31)); }));
-        RoomRegistry::Entry joined = rooms.join(busy.room->code(), "friend", start + chrono::minutes(45));   // joining counts as use
+        RoomRegistry::Entry joined = rooms.join(busyCode, "friend", start + chrono::minutes(45));   // joining counts as use
         CHECK(rooms.size() == 1 && joined.room == busy.room);
-        CHECK(rooms.size() == 1 && rooms.contains(busy.room->code()));
+        CHECK(rooms.size() == 1 && rooms.contains(busyCode));
         rooms.create("new", start + chrono::minutes(200));                   // creating sweeps too: the busy one expired by now
-        CHECK(rooms.size() == 1 && !rooms.contains(busy.room->code()));
+        CHECK(rooms.size() == 1 && !rooms.contains(busyCode));               // (busy.room is a dangling pointer by now: never touched)
     }
     {   // a limit on the number of rooms
         RoomRegistry rooms(catalog, 3);
