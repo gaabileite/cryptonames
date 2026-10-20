@@ -139,6 +139,7 @@
         setRoomBadge(null);
         moving = null;
         lastWait = null;
+        currentGame = null;
         resetRendering();
         document.title = BASE_TITLE;
     }
@@ -639,9 +640,21 @@
 
     // ---------- Game screen ----------
 
-    const cardButtons = [];
+    // The pin on each card: a reminder ("I want to pick this one later") for a whole team. It only highlights the card;
+    // picking the card is done by clicking the card itself. The server keeps the pins and EVERY player sees them: a pin
+    // is red when the red team put it and blue when the blue team did. The pin button is the one of your own team; the
+    // other team's pin, if any, is drawn next to it.
+    const PIN_ICON = '<svg viewBox="0 0 512 512" aria-hidden="true"><g transform="translate(256 256) rotate(45) scale(0.8) translate(0 -42)">'
+        + '<path class="pin-needle" d="M-24 195 L24 195 L0 350 Z"/>'
+        + '<ellipse class="pin-dark" cx="0" cy="165" rx="150" ry="82"/>'
+        + '<path class="pin-light" d="M-88 -150 H88 V150 A88 40 0 0 1 -88 150 Z"/>'
+        + '<ellipse class="pin-light" cx="0" cy="-170" rx="130" ry="92"/>'
+        + '<path class="pin-dark" d="M0 -262 A130 92 0 0 1 0 -78 Z"/></g></svg>';
+    const cardButtons = [], cardSlots = [], pinButtons = [], pinOthers = [];
     (function buildBoard() {
         for (let i = 0; i < 25; i++) {
+            const slot = document.createElement('div');         // holds the card and, next to it (not inside it), the pin
+            slot.className = 'card-slot';
             const button = document.createElement('button');
             button.type = 'button';
             button.dataset.index = i;
@@ -652,8 +665,22 @@
             const name = document.createElement('span');     // shown on hover, see style.css
             name.className = 'name';
             button.append(image, tag, name);
-            $('board').append(button);
+            const pin = document.createElement('button');
+            pin.type = 'button';
+            pin.className = 'pin';
+            pin.dataset.index = i;
+            pin.innerHTML = PIN_ICON;                           // a fixed icon, never player text
+            const other = document.createElement('span');       // the pin of the other team: only to look at
+            other.className = 'pin pin-other';
+            other.setAttribute('role', 'img');
+            other.hidden = true;
+            other.innerHTML = PIN_ICON;
+            slot.append(button, pin, other);
+            $('board').append(slot);
             cardButtons.push(button);
+            cardSlots.push(slot);
+            pinButtons.push(pin);
+            pinOthers.push(other);
         }
     })();
 
@@ -681,6 +708,28 @@
         button.className = `card key-${card.key}${card.state === 'REVEALED' ? ' revealed' : ''}${isSpy ? ' spy-view' : ''}`;
         button.disabled = !(state.canGuess && card.state === 'SECRET');
         button.setAttribute('aria-label', describeCard(card, isSpy));
+
+        // The pins: a picked card has none. Mine is the button of my team; the other team's is drawn next to it.
+        const revealed = card.state === 'REVEALED';
+        const myTeam = state.you.team;
+        const pins = revealed ? [] : (card.pins || []);
+        const pinnedByMyTeam = pins.includes(myTeam);
+        const others = pins.filter((team) => team !== myTeam);
+        const slot = cardSlots[index], pin = pinButtons[index], other = pinOthers[index];
+        slot.classList.toggle('pinned-BLUE', pins.includes('BLUE'));
+        slot.classList.toggle('pinned-RED', pins.includes('RED'));
+        slot.classList.toggle('pinned-mine', pinnedByMyTeam);
+        pin.hidden = revealed;
+        pin.dataset.team = myTeam;
+        pin.setAttribute('aria-pressed', pinnedByMyTeam ? 'true' : 'false');
+        pin.setAttribute('aria-label', `${pinnedByMyTeam ? 'Take the pin off' : 'Pin'} ${card.name} for your team`);
+        pin.title = pinnedByMyTeam ? "Take your team's pin off" : 'Pin this card for your team';
+        other.hidden = others.length === 0;
+        if (others.length > 0) {
+            other.dataset.team = others[0];
+            other.title = `The ${NAMES[others[0]]} team pinned this card`;
+            other.setAttribute('aria-label', other.title);
+        }
 
         // The colour as text too, so it does not depend on seeing the colours.
         const tag = button.querySelector('.tag');
@@ -976,6 +1025,25 @@
 
     let busy = false;     // one action at a time, so a double click does not guess twice
     let myTeam = null;    // set by refreshPlay(), used to tell a good guess from a bad one
+
+    // The pin only pins the card for my team (everybody sees it), it never picks it
+    $('board').addEventListener('click', async (event) => {
+        const pin = event.target.closest('button.pin');
+        if (!pin || !latest) return;
+        const index = Number(pin.dataset.index);
+        const team = latest.state.you.team, card = latest.cards[index];
+        const pinIt = !card.pins.includes(team);
+        card.pins = pinIt ? [...card.pins, team].sort() : card.pins.filter((each) => each !== team);      // shown at once, the server confirms
+        if (!flipping.has(index)) paintCard(index);
+        try {
+            await api('POST', '/api/pin', { index, pinned: pinIt });
+        } catch (error) {
+            toast(error.message, true);
+        } finally {
+            delete lastRendered.game;                      // draw again from what the server says
+            refreshPlay().catch(() => {});
+        }
+    });
 
     $('board').addEventListener('click', async (event) => {
         const button = event.target.closest('button.card');

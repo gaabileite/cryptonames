@@ -174,6 +174,8 @@ void testWaitingRoom() {
 }
 
 vector<int> cardsWithKey(const Match& match, const string& spy, CardKey key);
+Catalog twoUniverses();
+map<string, string> fillRoom(Room& room, bool startMatch);
 
 void testCooperative() {
     // fewer than 4 players: co-operative, from 2 players on
@@ -276,6 +278,61 @@ void testCooperative() {
         match.forfeit("p1");
         CHECK(match.isFinished() && match.wasForfeited() && match.forfeitedBy() == Team::BLUE && match.winner() == Team::RED);
     }
+}
+
+void testPins() {
+    // a pin is a reminder of a team, visible to everybody; both teams can pin the same card
+    Match match(fullLobby(), characters());                                       // bs, bg (BLUE); rs, rg (RED)
+    for (string name : {"bs", "bg", "rs", "rg"}) for (const CardView& card : match.viewFor(name)) CHECK(card.pins.empty());
+    match.setPin("bg", 3, true);
+    for (string name : {"bs", "bg", "rs", "rg"}) {                                // everybody sees it, whatever their team or role
+        CHECK(match.viewFor(name)[3].pins == vector<Team>{Team::BLUE});
+        CHECK(match.viewFor(name)[4].pins.empty());
+    }
+    match.setPin("rs", 3, true);                                                  // the other team pins the same card
+    CHECK(match.viewFor("bg")[3].pins == (vector<Team>{Team::BLUE, Team::RED}));
+    match.setPin("bs", 3, true);                                                  // a teammate asking for the same changes nothing
+    CHECK(match.viewFor("rg")[3].pins == (vector<Team>{Team::BLUE, Team::RED}));
+    match.setPin("bs", 3, false);                                                 // any player of the team takes the team's pin off
+    CHECK(match.viewFor("rg")[3].pins == vector<Team>{Team::RED});
+    match.setPin("bs", 3, false);                                                 // and asking again does nothing
+    CHECK(match.viewFor("rg")[3].pins == vector<Team>{Team::RED});
+    match.setPin("rg", 3, false);
+    CHECK(match.viewFor("bs")[3].pins.empty());
+    // not allowed
+    CHECK(rejects([&] { match.setPin("nobody", 3, true); }));                     // not in the match
+    CHECK(rejects([&] { match.setPin("bg", -1, true); }) && rejects([&] { match.setPin("bg", 25, true); }));
+    // it does not touch the game
+    match.setPin("bg", 5, true);
+    CHECK(!match.hasClue() && match.remaining(Team::BLUE) == 8 && match.remaining(Team::RED) == 8 && !match.isFinished());
+    // a picked card loses its pins (of both teams) and cannot be pinned
+    Team team = match.currentTeam();
+    string spy = spyOf(team), guesser = guesserOf(team);
+    vector<int> mine = cardsWithKey(match, spy, keyOf(team));
+    match.setPin("bs", mine[0], true); match.setPin("rg", mine[0], true);
+    CHECK(match.viewFor("bs")[mine[0]].pins.size() == 2);
+    match.giveClue(spy, "PINS", 2);
+    CHECK(match.guess(guesser, mine[0]) == keyOf(team));
+    CHECK(match.viewFor("bs")[mine[0]].pins.empty() && match.viewFor("rg")[mine[0]].pins.empty());
+    CHECK(rejects([&] { match.setPin("bs", mine[0], true); }));                   // already revealed
+    CHECK(match.viewFor("bg")[5].pins == vector<Team>{Team::BLUE});               // the other pins stay
+    // the match is over: nothing to pin any more
+    match.forfeit("rg");
+    CHECK(rejects([&] { match.setPin("bs", 8, true); }));
+    // a co-operative game: everybody is BLUE, so the pins are all blue and shared
+    Lobby pair = lobbyOf({{Team::BLUE, Role::SPY}, {Team::BLUE, Role::GUESSER}});
+    Match coop(pair, characters());
+    coop.setPin("p1", 2, true); coop.setPin("p0", 7, true);
+    CHECK(coop.viewFor("p0")[2].pins == vector<Team>{Team::BLUE} && coop.viewFor("p1")[7].pins == vector<Team>{Team::BLUE});
+    // a newcomer with no seat is not a player yet, and the one who took a seat pins for their team
+    Catalog catalog = twoUniverses();                                              // the room keeps a reference to it: a named one
+    Room room("PINS1", catalog);
+    map<string, string> t = fillRoom(room, true);
+    string late = room.join("late", JoinChoice::PLAY);
+    CHECK(rejects([&] { room.match().setPin("late", 1, true); }));
+    room.chooseSeat(late, Team::RED, Role::GUESSER);
+    room.match().setPin("late", 1, true);
+    CHECK(room.match().viewFor("bs")[1].pins == vector<Team>{Team::RED});
 }
 
 void testBiggerTeams() {
@@ -1484,6 +1541,7 @@ int main() {
     run("room", testRoom);
     run("room match", testRoomMatch);
     run("host", testHost);
+    run("pins", testPins);
     run("room registry", testRoomRegistry);
     run("grid", testGrid);
     run("match setup and views", testMatchSetupAndViews);

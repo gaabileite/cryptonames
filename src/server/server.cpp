@@ -49,7 +49,9 @@
 //   GET  /api/state      the room code, which match of the room this is ("game"), the turn, the cards left, the time left, the clue and tries left, the winner,
 //                        who you are, whether the game is co-operative, and whether leaving would make your team
 //                        forfeit                                                            (X-Token)
-//   GET  /api/board      the 25 cards as YOU may see them                                  (X-Token)
+//   GET  /api/board      the 25 cards as YOU may see them, each with "pins": the teams that pinned it (BLUE, RED)  (X-Token)
+//   POST /api/pin        {"index": 0-24, "pinned": true|false} pins a card for your team, or takes your team's pin off. Any
+//                        player of the team, spy or guesser. Every player sees every pin; a picked card loses them  (X-Token)
 //   POST /api/clue       {"text": "1-2 words", "number": n} the SPY's clue of the turn     (X-Token)
 //   POST /api/guess      {"index": 0-24} -> {"key"}   only after the clue; every guess is a try   (X-Token)
 //   POST /api/end-turn                                                                     (X-Token)
@@ -411,8 +413,10 @@ int main(int argc, char* argv[]) {
         json cards = json::array();
         int index = 0;
         for (const CardView& card : in.room.match().viewFor(in.you.name)) {
+            json pins = json::array();
+            for (Team team : card.pins) pins.push_back(toString(team));
             cards.push_back({{"index", index++}, {"name", card.characterName}, {"image", card.image},
-                             {"key", toString(card.key)}, {"state", toString(card.state)}});
+                             {"key", toString(card.key)}, {"state", toString(card.state)}, {"pins", pins}});
         }
         return json{{"cards", cards}};
     }));
@@ -444,6 +448,20 @@ int main(int argc, char* argv[]) {
         }
         CardKey key = in.room.match().guess(in.you.name, (int)index);
         return json{{"key", toString(key)}};
+    }));
+
+    server.Post("/api/pin", endpoint([](const httplib::Request& req) {
+        Visitor in = visitorOf(req);
+        json body = bodyOf(req);
+        if (!body.contains("index") || !body["index"].is_number_integer()) {
+            throw HttpError(400, "Missing whole-number field: index");
+        }
+        long long index = body["index"].get<long long>();      // not an int: a huge number must not wrap around into a valid card
+        if (index < 0 || index > 24) {
+            throw HttpError(400, "The card must be between 0 and 24");
+        }
+        in.room.match().setPin(in.you.name, (int)index, booleanField(body, "pinned"));
+        return json{{"ok", true}};
     }));
 
     server.Post("/api/end-turn", endpoint([](const httplib::Request& req) {

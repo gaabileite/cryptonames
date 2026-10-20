@@ -443,9 +443,44 @@ button:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
     transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 .card img { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+/* The pin: top right of the card, next to the card (not inside it) so that it never picks the card */
+.card-slot { position: relative; }
+.pin {
+    position: absolute;
+    z-index: 2;
+    top: 6px;
+    right: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    background: rgba(255, 255, 255, 0.9);
+    border: 0;
+    border-radius: 50%;
+    opacity: 0.7;
+}
+.pin:hover { opacity: 1; }
+.pin:focus-visible { outline: 3px solid var(--text); outline-offset: 2px; }
+.pin svg { width: 24px; height: 24px; }
+/* The pin is a flat push-pin, in the colour of the team that put it: red or blue */
+.pin { --pin-light: #3368d8; --pin-dark: #234fa8; }
+.pin[data-team="RED"] { --pin-light: #e11736; --pin-dark: #a50f28; }
+.pin .pin-light { fill: var(--pin-light); }
+.pin .pin-dark { fill: var(--pin-dark); }
+.pin .pin-needle { fill: #cfd8dc; }
+/* The pin of the other team: next to mine, only to look at */
+.pin-other { right: 42px; opacity: 1; pointer-events: none; }
 .card:disabled { cursor: default; }
 .card:not(:disabled):hover { transform: translateY(-3px); box-shadow: 0 6px 14px rgba(0, 0, 0, 0.3); }
 .card:focus-visible { outline: 3px solid var(--text); outline-offset: 2px; }
+/* A pinned card: a ring in the colour of the team(s) that pinned it, and my own pin at full strength */
+.card-slot.pinned-BLUE .card { box-shadow: 0 0 0 3px var(--bg), 0 0 0 6px #3368d8; }
+.card-slot.pinned-RED .card { box-shadow: 0 0 0 3px var(--bg), 0 0 0 6px #e11736; }
+.card-slot.pinned-BLUE.pinned-RED .card { box-shadow: 0 0 0 3px #3368d8, 0 0 0 6px #e11736; }
+.card-slot.pinned-mine .pin { opacity: 1; }
 
 /* A spy sees every colour, so the cards that were already guessed are dimmed. */
 .card.spy-view.revealed img { opacity: 0.4; }

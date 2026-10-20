@@ -51,6 +51,15 @@ Rooms live in the server's memory, so restarting the server closes them all.
 10. **Leave the room** takes you back to the start page. During a match you are asked first: your team goes on without you, unless you were its last spy or its last guesser, and then it forfeits. After the match leaving is free. When the last player has left, the room is deleted. To play again with the same people, use *Play again* (see below) instead of leaving.
 11. The black card loses the game for the team that reveals it. The first team to reveal all its cards wins. Every card that is picked turns over on every player's screen.
 
+### Pins
+
+Every card has a **pin** button at its top right: a reminder for your team, *"I want to pick this one later"*. Clicking the pin only highlights the card; clicking the card itself is what picks it.
+
+- **Everybody sees every pin, and the colour says who put it:** a blue pin is the blue team's and a red pin the red team's (in a co-operative game everything is blue). Your own team's pin is the button at the top right of the card; if the other team pinned the same card too, their pin is drawn next to yours and the card gets a ring in each team's colour. So the other team can see what you plan to pick.
+- A pin belongs to the **team**: any player of the team, spy or guesser, can add it or take it off.
+- A card that gets picked loses its pins. A refresh keeps the pins (the server holds them), and a new game starts without any.
+- Pinning changes nothing in the game itself (it does not use a try or pass the turn).
+
 ### The host and who can edit the room
 
 The player who makes a room is its **host** (`creator` on the player; the lobby calls it `Member.creator`, and `Player.creator` carries it into the match). Only the host sees a switch in the waiting room, **All can edit**:

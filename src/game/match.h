@@ -15,6 +15,7 @@ struct CardView {
     string image;       // picture matching the key this player may see, e.g. images/mcu/iron_man_tony_stark/beige.png
     CardKey key;
     CardState state;
+    vector<Team> pins;  // the teams that pinned this card (a reminder, visible to everybody); BLUE first
 };
 
 // Runs one game: owns the players, the board and the turns.
@@ -26,6 +27,9 @@ struct CardView {
 //   forfeit(name)         -> a team gives up: any of its players, at any time, and the other team wins
 //   playerLeft(name)      -> a player left the room: their team goes on, unless it is left without a spy or a guesser
 //   addPlayer(name, team, role) -> a player who came into the room after the start takes a seat (co-operative: always BLUE)
+//   setPin(name, index, pinned) -> a player pins a card (or takes the pin off) for their team: a reminder that every player
+//                               sees, in the colour of the team. Both teams can pin the same card. A card that is picked
+//                               loses its pins.
 //   advanceClock()        -> with a time limit, passes the turn when the time of a turn has run out
 // Anything not allowed throws invalid_argument with a message that can be shown to the player.
 //
@@ -67,6 +71,7 @@ class Match {
         int triesLeft;                    // tries left for the clue of this turn
         int goodTries;                    // good tries (cards of the team found) in this turn
         int carryOver[2];                 // extra tries waiting for the next clue of each team (indexed by sideOf)
+        set<int> pinned[2];               // the cards each team pinned (indexed by sideOf)
 
         static int sideOf(Team team) {
             return team == Team::BLUE ? 0 : 1;
@@ -294,10 +299,15 @@ class Match {
         vector<CardView> viewFor(const string& name) const {
             const Player& player = findPlayer(name);
             vector<CardView> view;
-            for (const Card& card : grid.lineup) {
+            for (int i = 0; i < 25; i++) {
+                const Card& card = grid.lineup[i];
                 bool visible = player.isSpy() || card.state == CardState::REVEALED;
                 CardKey shown = visible ? card.key : CardKey::BEIGE;
-                view.push_back({card.characterName, card.imageFor(shown), shown, card.state});
+                vector<Team> pins;
+                for (Team team : {Team::BLUE, Team::RED}) {
+                    if (pinned[sideOf(team)].count(i)) pins.push_back(team);
+                }
+                view.push_back({card.characterName, card.imageFor(shown), shown, card.state, pins});
             }
             return view;
         }
@@ -334,6 +344,24 @@ class Match {
             goodTries = 0;
         }
 
+        // Pins the card at index (0-24) for the player's team, or takes the team's pin off. Any player of the team can do it,
+        // spy or guesser, at any moment of the match; it changes nothing in the game. Whether the card is pinned afterwards
+        // does not depend on what it was before, so two players asking for the same thing do not undo each other.
+        void setPin(const string& name, int index, bool pin) {
+            if (matchState == MatchState::FINISHED) {
+                throw invalid_argument("The match is already over");
+            }
+            const Player& player = findPlayer(name);
+            if (index < 0 || index >= 25) {
+                throw invalid_argument("The card must be between 0 and 24");
+            }
+            if (grid.lineup[index].state == CardState::REVEALED) {
+                throw invalid_argument("That card was already revealed");
+            }
+            if (pin) pinned[sideOf(player.team)].insert(index);
+            else pinned[sideOf(player.team)].erase(index);
+        }
+
         // Reveals the card at index (0-24) and returns its key. Costs one try.
         CardKey guess(const string& name, int index, Clock::time_point now = Clock::now()) {
             advanceClock(now);                    // a guess that comes after the time is up is for the next team's turn
@@ -349,6 +377,8 @@ class Match {
             }
 
             CardKey key = grid.lineup[index].reveal();
+            pinned[0].erase(index);               // a picked card is not a reminder any more
+            pinned[1].erase(index);
             Team other = opposite(player.team);
 
             if (key == CardKey::BLACK) {
