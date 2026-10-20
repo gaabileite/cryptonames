@@ -496,7 +496,7 @@ button:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
 .pin[data-team="RED"] { --pin-light: #e11736; --pin-dark: #a50f28; }
 .pin .pin-light { fill: var(--pin-light); }
 .pin .pin-dark { fill: var(--pin-dark); }
-.pin .pin-needle { fill: #cfd8dc; }
+.pin .pin-needle { fill: #90a4ae; }
 /* The pin of the other team: next to mine, only to look at */
 .pin-other { right: 42px; opacity: 1; pointer-events: none; }
 .card:disabled { cursor: default; }
