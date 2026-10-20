@@ -28,6 +28,8 @@
 <body>
     <header class="topbar">
         <h1><img class="brand" src="brand/wordmark.png" alt="CryptoNames" width="164" height="54"></h1>
+        <!-- Whose turn it is, or who won: during a game, next to the logo -->
+        <div id="banner" class="banner" role="status" hidden></div>
         <div class="topbar-right">
             <span id="room-badge" class="room-badge" hidden></span>
             <div id="whoami" class="whoami" hidden></div>
@@ -142,8 +144,9 @@
 
         <!-- Game -->
         <section id="screen-game" hidden>
-            <div id="banner" class="banner"></div>
-            <div id="turn-timer" class="turn-timer" role="timer" aria-label="Time left in this turn" hidden></div>
+            <!-- The clue (or the spy's clue box) with the countdown beside it, so the countdown needs no row of its own -->
+            <div class="turn-row">
+                <div class="turn-main">
             <div id="clue-bar" class="clue-bar" aria-live="polite"></div>
             <form id="clue-form" class="clue-form" novalidate hidden>
                 <label for="clue-text">Your clue <span class="note">(1 or 2 words)</span></label>
@@ -156,6 +159,9 @@
                 <p id="clue-extra" class="note small" hidden></p>
                 <p id="clue-error" class="error" role="alert" hidden></p>
             </form>
+                </div>
+                <div id="turn-timer" class="turn-timer" role="timer" aria-label="Time left in this turn" hidden></div>
+            </div>
 
             <div class="status">
                 <div id="score-BLUE" class="score team-BLUE"></div>

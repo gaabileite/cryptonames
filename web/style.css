@@ -337,10 +337,13 @@ body.in-game .board { gap: 8px; }
 .clue-list .result { color: var(--muted); font-size: 0.9rem; }
 .clue-list:empty::after { content: "No clues yet."; color: var(--muted); }
 
+.turn-row { display: flex; flex-wrap: wrap; gap: 0 12px; align-items: stretch; }
+.turn-main { flex: 1 1 320px; min-width: 0; }
+.turn-row .turn-timer { align-self: flex-start; }
 .turn-timer {
     width: fit-content;
-    margin: 10px auto 0;
-    padding: 4px 18px;
+    margin: 12px 0 0;
+    padding: 6px 18px;
     font-size: 1.5rem;
     font-weight: 800;
     font-variant-numeric: tabular-nums;
@@ -417,6 +420,8 @@ button:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
 }
 .banner.team-BLUE { background: var(--blue); }
 .banner.team-RED { background: var(--red); }
+/* In the top bar, right after the logo: smaller, and the icons stay on the right */
+.topbar .banner { margin-right: auto; padding: 9px 18px; font-size: 1.05rem; line-height: 1.2; }
 
 .status {
     display: grid;
@@ -479,8 +484,8 @@ button:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
 .pin {
     position: absolute;
     z-index: 2;
-    top: 6px;
-    right: 6px;
+    top: -8px;
+    right: -8px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -502,7 +507,7 @@ button:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
 .pin .pin-dark { fill: var(--pin-dark); }
 .pin .pin-needle { fill: #90a4ae; }
 /* The pin of the other team: next to mine, only to look at */
-.pin-other { right: 42px; opacity: 1; pointer-events: none; }
+.pin-other { right: 28px; opacity: 1; pointer-events: none; }
 .card:disabled { cursor: default; }
 .card:not(:disabled):hover { transform: translateY(-3px); box-shadow: 0 6px 14px rgba(0, 0, 0, 0.3); }
 .card:focus-visible { outline: 3px solid var(--text); outline-offset: 2px; }
@@ -613,6 +618,14 @@ button.danger:disabled { opacity: 0.4; cursor: not-allowed; }
 }
 
 @media (max-width: 520px) {
+    /* The top bar of a phone: the logo and the banner share the first row, the room and the icons are on the second */
+    .topbar { padding: 8px 10px; gap: 6px 10px; }
+    .brand { height: 40px; }
+    .topbar .banner { flex: 1 1 0; min-width: 0; margin-right: 0; padding: 6px 10px; font-size: 0.8rem; }
+    .topbar-right { gap: 6px 8px; }
+    .topbar .room-badge { padding: 2px 8px; font-size: 0.8rem; }
+    .topbar .whoami { gap: 6px; font-size: 0.85rem; }
+    .topbar .icon-btn { width: 34px; height: 34px; }
     .board { grid-template-columns: repeat(2, 1fr); }
     .status { grid-template-columns: 1fr 1fr; }
     .hint { grid-column: 1 / -1; order: 3; }

@@ -62,6 +62,7 @@
     function show(name) {
         for (const key of Object.keys(screens)) screens[key].hidden = key !== name;
         document.body.classList.toggle('in-game', name === 'game');           // the game page uses the whole width of the window
+        $('banner').hidden = name !== 'game';                                  // whose turn it is: in the top bar, during a game only
     }
 
     function chip(team) {
